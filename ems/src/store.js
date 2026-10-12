@@ -90,7 +90,7 @@ export async function createStore(directory, source) {
   try {
     state = configSchema.parse(JSON.parse(await readFile(path, 'utf8')));
   } catch (error) {
-    if (error.code !== 'ENOENT') throw new Error('Opgeslagen instellingen zijn ongeldig; herstel settings.json voordat je start.');
+    if (error.code !== 'ENOENT') throw new Error('Opgeslagen instellingen zijn ongeldig; herstel settings.json voordat je start.', { cause: error });
     state = configSchema.parse({ version: 1, source, mappings: { ...emptyMappings }, preferences: { ...defaultPreferences } });
   }
   if (state.source !== source) state = { ...state, source, mappings: { ...emptyMappings }, thermal: thermalSchema.parse({ sources: [], rooms: [] }), control: structuredClone(defaultRules) };
