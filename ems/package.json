@@ -1,0 +1,24 @@
+{
+  "name": "gridnest",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test",
+    "build": "esbuild web/app.js --bundle --minify --outfile=public/app.js && esbuild web/style.css --bundle --minify --loader:.woff2=file --loader:.woff=file --asset-names=fonts/[name]-[hash] --outfile=public/style.css",
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "@fontsource-variable/manrope": "^5.3.0",
+    "express": "^5.1.0",
+    "lucide": "^0.468.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "yaml": "^2.9.1"
+  }
+}
