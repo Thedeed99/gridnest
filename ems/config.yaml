@@ -1,5 +1,5 @@
 name: Gridnest
-version: "0.1.1"
+version: "0.1.2"
 slug: gridnest
 description: Lokaal EMS met eigen energie- en verwarmingsregels
 arch:

@@ -15,6 +15,7 @@ test('Gridnest metadata, pakketversie en containerlabel komen overeen', async ()
   assert.equal(config.name, 'Gridnest');
   assert.equal(config.slug, 'gridnest');
   assert.equal(pkg.name, 'gridnest');
+  assert.equal(config.version, '0.1.2');
   assert.equal(config.version, pkg.version);
   assert.equal(lock.version, pkg.version);
   assert.equal(lock.packages[''].version, pkg.version);
@@ -38,9 +39,15 @@ test('publicatieworkflow gebruikt gelijknamige image en beide architecturen', as
   const steps = workflow.jobs.container.steps;
   const metadata = steps.find(step => step.id === 'meta');
   const build = steps.find(step => step.uses === 'docker/build-push-action@v6');
+  const smokeSteps = workflow.jobs.smoke.steps;
+  const supervisorRun = smokeSteps.find(step => step.name === 'Run isolated Supervisor-mode container');
+  const supervisorCheck = smokeSteps.find(step => step.name === 'Check root-only options and non-root server');
   assert.equal(metadata.with.images, 'ghcr.io/${{ github.repository }}');
   assert.equal(build.with.platforms, 'linux/amd64,linux/arm64');
   assert.equal(build.with.push, "${{ github.event_name != 'pull_request' }}");
+  assert.match(supervisorRun.run, /target=\/data\/options\.json,readonly/);
+  assert.doesNotMatch(supervisorRun.run, /\s-p\s/);
+  assert.match(supervisorCheck.run, /CONTROL_ENABLED=true/);
 });
 
 test('echte sturing is standaard uit in de appconfiguratie en heeft een Nederlandse optie', async () => {

@@ -60,11 +60,24 @@ jobs:
           curl --fail --retry 15 --retry-all-errors --retry-delay 1 http://127.0.0.1:8080/health | jq -e '.status == "ok"'
           curl --fail http://127.0.0.1:8080/api/bootstrap | jq -e '.demo == true and .controlStatus.activeAllowed == false and .thermal.mode == "off"'
           docker exec gridnest-smoke sh -c "grep -Eq '^Uid:[[:space:]]+1000' /proc/1/status"
+      - name: Prepare Supervisor options
+        run: |
+          mkdir -p "$RUNNER_TEMP/gridnest-smoke"
+          printf '{"allow_control":true}\n' > "$RUNNER_TEMP/gridnest-smoke/options.json"
+          chmod 600 "$RUNNER_TEMP/gridnest-smoke/options.json"
+      - name: Run isolated Supervisor-mode container
+        run: docker run -d --name gridnest-smoke-supervisor --platform ${{ matrix.platform }} -e SUPERVISOR_TOKEN=smoke-token --mount type=bind,source="$RUNNER_TEMP/gridnest-smoke/options.json",target=/data/options.json,readonly gridnest-smoke:local
+      - name: Check root-only options and non-root server
+        run: |
+          docker exec gridnest-smoke-supervisor node -e "fetch('http://127.0.0.1:8080/health').then(response => { if (response.status !== 403) process.exit(1); }).catch(() => process.exit(1))"
+          docker exec gridnest-smoke-supervisor sh -c "grep -Eq '^Uid:[[:space:]]+1000' /proc/1/status"
+          docker exec gridnest-smoke-supervisor node -e "const env = require('node:fs').readFileSync('/proc/1/environ', 'utf8'); if (!env.split('\\0').includes('CONTROL_ENABLED=true')) process.exit(1)"
       - name: Container logs and cleanup
         if: always()
         run: |
           docker logs gridnest-smoke || true
-          docker rm -f gridnest-smoke || true
+          docker logs gridnest-smoke-supervisor || true
+          docker rm -f gridnest-smoke gridnest-smoke-supervisor || true
 
   container:
     if: startsWith(github.ref, 'refs/tags/v')

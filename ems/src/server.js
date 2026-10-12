@@ -1,7 +1,6 @@
 import express from 'express';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
-import { readFile } from 'node:fs/promises';
 import { z, ZodError } from 'zod';
 import { executeRuleCommand, readEntities, readTemperatureUnit, readings, roles, validateMappings } from './home-assistant.js';
 import { createStore, heatingProfiles, preferencesSchema } from './store.js';
@@ -130,13 +129,7 @@ export async function startServer(env = process.env) {
   const demo = env.DEMO_MODE === 'true';
   if (demo && (env.SUPERVISOR_TOKEN || env.HA_TOKEN)) throw new Error('Demomodus en echte toegangssleutels mogen niet gecombineerd worden.');
   const supervisor = Boolean(env.SUPERVISOR_TOKEN);
-  let controlEnv = env;
-  if (supervisor) {
-    let options = {};
-    try { options = JSON.parse(await readFile('/data/options.json', 'utf8')); }
-    catch (error) { if (error.code !== 'ENOENT') throw new Error('Ongeldige appconfiguratie.', { cause: error }); }
-    controlEnv = { ...env, CONTROL_ENABLED: env.CONTROL_ENABLED === 'true' || options.allow_control === true ? 'true' : 'false' };
-  }
+  const controlEnv = { ...env, CONTROL_ENABLED: supervisor && env.CONTROL_ENABLED === 'true' ? 'true' : 'false' };
   const store = await createStore(env.DATA_DIR || fileURLToPath(new URL('../data/', import.meta.url)), demo ? 'demo' : 'home-assistant');
   if (store.get().control.mode === 'active') await store.update({ control: { ...store.get().control, mode: 'preview' } });
   if (store.get().thermal.mode === 'active') await store.update({ thermal: { ...store.get().thermal, mode: 'preview' } });

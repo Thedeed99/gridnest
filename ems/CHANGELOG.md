@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.2 - 2026-10-12
+
+- Lees de Supervisor-optie voordat de server als niet-rootgebruiker start.
+
 ## 0.1.1 - 2026-10-12
 
 - Toon de oorspronkelijke fout en stacktrace wanneer de app niet kan starten.
