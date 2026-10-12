@@ -47,7 +47,7 @@ test('publicatieworkflow gebruikt gelijknamige image en beide architecturen', as
   assert.equal(build.with.push, "${{ github.event_name != 'pull_request' }}");
   assert.match(supervisorRun.run, /target=\/data\/options\.json,readonly/);
   assert.doesNotMatch(supervisorRun.run, /\s-p\s/);
-  assert.match(supervisorCheck.run, /CONTROL_ENABLED=true/);
+  assert.match(supervisorCheck.run, /sturing toegestaan/);
 });
 
 test('echte sturing is standaard uit in de appconfiguratie en heeft een Nederlandse optie', async () => {

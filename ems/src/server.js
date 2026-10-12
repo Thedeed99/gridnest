@@ -141,7 +141,8 @@ export async function startServer(env = process.env) {
   const app = createApp({ store, demo, supervisor, entitiesProvider, runner });
   const server = app.listen(8080, env.HOST || (supervisor ? '0.0.0.0' : '127.0.0.1'), () => {
     runner.start();
-    console.log(`Gridnest beschikbaar op poort 8080 (${demo ? 'demo' : 'regels standaard uit'}).`);
+    const mode = demo ? 'demo' : runner.status().activeAllowed ? 'sturing toegestaan' : 'regels standaard uit';
+    console.log(`Gridnest beschikbaar op poort 8080 (${mode}).`);
   });
   server.once('close', () => runner.stop());
   for (const signal of ['SIGTERM', 'SIGINT']) process.once(signal, () => { runner.stop(); server.close(); });
