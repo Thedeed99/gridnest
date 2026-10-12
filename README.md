@@ -2,6 +2,12 @@
 
 Een zelfstandig, lokaal EMS-project voor Nederlandse huishoudens, gebouwd rond Home Assistant.
 
+## Voorbeeld
+
+De startpagina met fictieve demo-entiteiten en meetwaarden, zonder persoonlijke Home Assistant-gegevens.
+
+![Gridnest-startpagina met energiestromen, fasewaarden, bekende verbruikers, kamers en dagrecap](docs/images/gridnest-overview.png)
+
 ## Eerste versie
 
 - Entiteiten uit de eigen Home Assistant selecteren op naam, type en eenheid.
@@ -54,3 +60,9 @@ Voor de eerste lokale Home Assistant OS-pilot is een bronpakket voorbereid. De [
 Een eigen repository toevoegen aan de Home Assistant Store is niet hetzelfde als opname in een officiële of communitycatalogus. De bronrepository is publiek; er is nog geen distributielicentie gekozen. Zonder licentie is hergebruik en verdere distributie door anderen niet toegestaan.
 
 Zie [publicatiechecklist](docs/publication.md), [ontwikkelrichting](docs/roadmap.md) en [add-ondocumentatie](ems/DOCS.md).
+
+## Copyright
+
+Copyright (c) 2026 Gridnest. Alle rechten voorbehouden.
+
+Zie [COPYRIGHT](COPYRIGHT). Deze vermelding verleent geen licentie voor hergebruik of distributie. Afhankelijkheden van derden behouden hun eigen licenties en copyrightvermeldingen.
