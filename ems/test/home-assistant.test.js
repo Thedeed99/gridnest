@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { compatible, emptyMappings, normalizeStates, readEntities, readings, roles, validateMappings } from '../src/home-assistant.js';
+import { demoEntities } from '../src/demo.js';
 
 const state = (entity_id, unit = 'W', value = '1200', attributes = {}) => ({
   entity_id, state: value, attributes: { friendly_name: 'Mijn apparaat', unit_of_measurement: unit, ...attributes },
@@ -88,4 +89,29 @@ test('accuhealth accepteert een optionele sensor in procenten', () => {
   const health = normalizeStates([state('sensor.battery_health', '%', '96', { device_class: 'battery' })])[0];
   assert.equal(compatible(roles.find(role => role.id === 'batteryHealth'), health), true);
   assert.equal(compatible(roles.find(role => role.id === 'batteryHealth'), normalizeStates([state('sensor.battery_health', 'W', '96')])[0]), false);
+});
+
+test('optionele EV-, accu- en zonnebediening koppelingen valideren domein en eenheid', () => {
+  const entities = normalizeStates([
+    state('binary_sensor.ev_cable', '', 'on'),
+    state('lock.ev_cable', '', 'locked'),
+    state('sensor.ev_session', 'kWh', '3.2'),
+    state('sensor.ev_l1', 'A', '16'),
+    state('switch.battery_enable', '', 'on'),
+    state('sensor.battery_input', 'W', '300'),
+    state('sensor.battery_output', 'W', '250'),
+    state('sensor.battery_time', 'h', '4'),
+    state('number.inverter_limit', '%', '100', { min: 0, max: 100, step: 1 })
+  ]);
+  const mappings = validateMappings({ ...emptyMappings, evCableStatus: 'binary_sensor.ev_cable', evLockStatus: 'lock.ev_cable',
+    evSessionEnergy: 'sensor.ev_session', evPhase1Current: 'sensor.ev_l1', batteryEnable: 'switch.battery_enable',
+    batteryInputPower: 'sensor.battery_input', batteryOutputPower: 'sensor.battery_output', batteryRemainingTime: 'sensor.battery_time', solarLimit: 'number.inverter_limit' }, entities);
+  assert.equal(mappings.evCableStatus, 'binary_sensor.ev_cable');
+  assert.equal(mappings.batteryEnable, 'switch.battery_enable');
+  assert.throws(() => validateMappings({ ...emptyMappings, solarLimit: 'sensor.ev_session' }, entities));
+});
+
+test('demo sensor identifiers blijven uniek', () => {
+  const ids = demoEntities().map(entity => entity.id);
+  assert.equal(new Set(ids).size, ids.length);
 });

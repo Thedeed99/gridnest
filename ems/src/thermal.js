@@ -3,13 +3,21 @@ import { thermalSchema } from './store.js';
 import { isFresh, planRules } from './rules.js';
 import { solarTarget } from './thermal-solar.js';
 
+export function entityPresence(entity, now = null, maxAge = 900) {
+  const usable = entity?.available && (now === null || isFresh(entity, now, maxAge));
+  if (!usable) return null;
+  if (['person', 'device_tracker'].includes(entity.domain)) {
+    if (['', 'unknown', 'unavailable'].includes(entity.state)) return null;
+    return entity.state === 'home';
+  }
+  if (entity.domain === 'binary_sensor' && ['occupancy', 'presence'].includes(entity.deviceClass) && ['on', 'off'].includes(entity.state)) return entity.state === 'on';
+  return null;
+}
+
 export function householdPresence(preferences, entities, now = null, maxAge = 900) {
   const members = (preferences.presenceEntities ?? []).map(id => {
     const entity = entities.find(entity => entity.id === id);
-    let home = null;
-    const usable = entity?.available && (now === null || isFresh(entity, now, maxAge));
-    if (usable && ['person', 'device_tracker'].includes(entity.domain) && !['', 'unknown', 'unavailable'].includes(entity.state)) home = entity.state === 'home';
-    if (usable && entity.domain === 'binary_sensor' && ['occupancy', 'presence'].includes(entity.deviceClass) && ['on', 'off'].includes(entity.state)) home = entity.state === 'on';
+    const home = entityPresence(entity, now, maxAge);
     return { id, name: entity?.name ?? id, home };
   });
   let occupied = null;
@@ -38,7 +46,8 @@ export function validateThermal(input, entities, mappings = {}) {
   }
   for (const room of thermal.rooms) {
     if (room.temperatureEntity && !compatible(roles.find(role => role.id === 'temperature'), find(room.temperatureEntity) ?? {})) throw new Error('Een kamer vereist een bestaande temperatuursensor in graden Celsius.');
-    if (room.presenceEntity && !compatible(roles.find(role => role.id === 'presence'), find(room.presenceEntity) ?? {})) throw new Error('Een kamer vereist een bestaande aanwezigheidssensor.');
+    const presence = find(room.presenceEntity);
+    if (room.presenceEntity && !(presence && (['person', 'device_tracker'].includes(presence.domain) || compatible(roles.find(role => role.id === 'presence'), presence)))) throw new Error('Een kamer vereist een bestaande aanwezigheidssensor.');
   }
   return thermal;
 }
@@ -56,7 +65,7 @@ export function thermalReadings(thermal, entities, preferences = {}) {
     const valid = temperature?.available && temperature.domain === 'sensor' && temperature.unit === '°C' && temperature.state.trim() !== '' && Number.isFinite(Number(temperature.state));
     const currentC = valid ? Number(temperature.state) : null;
     const presence = find(room.presenceEntity);
-    const occupied = room.presenceEntity ? presence?.available && ['on', 'off'].includes(presence.state) ? presence.state === 'on' : null : householdPresence(preferences, entities).occupied;
+    const occupied = room.presenceEntity ? entityPresence(presence) : householdPresence(preferences, entities).occupied;
     const status = currentC === null ? 'missing' : currentC < room.targetC - 0.3 ? 'below' : currentC > room.targetC + 0.3 ? 'above' : 'at-target';
     return { ...room, currentC, occupied, status, updatedAt: temperature?.updatedAt ?? null,
       sources: room.sourceIds.map(id => sources.find(source => source.id === id)).filter(Boolean) };
@@ -83,7 +92,7 @@ export function planThermal({ thermal, settings, entities, mappings, temperature
     let occupied = null;
     if (room.presenceControl) {
       const presence = entities.find(entity => entity.id === room.presenceEntity);
-      occupied = room.presenceEntity ? isFresh(presence, now, settings.maxAgeSeconds) && presence.domain === 'binary_sensor' && ['occupancy', 'presence'].includes(presence.deviceClass) && ['on', 'off'].includes(presence.state) ? presence.state === 'on' : null : householdPresence(preferences, entities, now, settings.maxAgeSeconds).occupied;
+      occupied = room.presenceEntity ? entityPresence(presence, now, settings.maxAgeSeconds) : householdPresence(preferences, entities, now, settings.maxAgeSeconds).occupied;
       if (occupied === null || !Number.isFinite(preferences.awayC)) { plans.push(blocked('Aanwezigheidsregeling vereist bekende, recente aanwezigheid en een afwezigtemperatuur.')); continue; }
       if (!occupied) baseTarget = Math.min(room.targetC, preferences.awayC);
     }

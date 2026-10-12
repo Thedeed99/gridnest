@@ -104,10 +104,10 @@ test('fasestroom en spanning worden per fase als schijnbaar vermogen in VA berek
   const result = energySummary(mappings, [
     sensor('sensor.l1_current', 5, 'A'), sensor('sensor.l1_voltage', 230, 'V')
   ]);
-  assert.deepEqual(result.phaseLoads[0], { phase: 'L1', currentA: 5, voltageV: 230, apparentPowerVA: 1150 });
+  assert.deepEqual(result.phaseLoads[0], { phase: 'L1', currentA: 5, voltageV: 230, activePowerKw: null, apparentPowerVA: 1150 });
   assert.deepEqual(result.phaseLoads.slice(1), [
-    { phase: 'L2', currentA: null, voltageV: null, apparentPowerVA: null },
-    { phase: 'L3', currentA: null, voltageV: null, apparentPowerVA: null }
+    { phase: 'L2', currentA: null, voltageV: null, activePowerKw: null, apparentPowerVA: null },
+    { phase: 'L3', currentA: null, voltageV: null, activePowerKw: null, apparentPowerVA: null }
   ]);
 });
 
@@ -118,4 +118,11 @@ test('zonneverwachting vergelijkt forecast sensoren met actuele productie', () =
   assert.equal(result.solarOutlook.actualNowKw, 2.1);
   assert.equal(result.solarOutlook.expectedNowKw, 2.5);
   assert.equal(result.solarOutlook.expectedTodayKwh, 9.55);
+});
+
+test('gemeten fasevermogen in kW heeft voorrang op de VA-schatting', () => {
+  const mappings = { ...emptyMappings, phase1Current: 'sensor.l1_current', phase1Voltage: 'sensor.l1_voltage', phase1Power: 'sensor.l1_power' };
+  const result = energySummary(mappings, [sensor('sensor.l1_current', 5, 'A'), sensor('sensor.l1_voltage', 230, 'V'), sensor('sensor.l1_power', 0.15, 'kW')]);
+  assert.equal(result.phaseLoads[0].activePowerKw, 0.15);
+  assert.equal(result.phaseLoads[0].apparentPowerVA, 1150);
 });

@@ -7,19 +7,24 @@ import { createStore, heatingProfiles, preferencesSchema } from './store.js';
 import { energySummary } from './energy.js';
 import { demoEntities } from './demo.js';
 import { householdPresence, thermalReadings, validatePresencePreferences, validateThermal } from './thermal.js';
-import { actionTypes, validateRules } from './rules.js';
+import { actionTypes, isFresh, validateRules } from './rules.js';
 import { createRuleRunner } from './rule-runner.js';
 import { demoUtilityHistory, readUtilityHistory } from './gas.js';
 import { dailyEnergyRecap, demoDailyRecap, recapMeters, readDailyRecap } from './daily-recap.js';
 
-export function createApp({ store, entitiesProvider, demo = false, supervisor = false, runner = null, utilityHistoryProvider = async () => ({ available: false, series: { hours24: [], days7: [], days30: [] } }), dailyRecapProvider = async () => ({ available: false, complete: false, rows: [] }) }) {
+export function createApp({ store, entitiesProvider, demo = false, supervisor = false, runner = null,
+  isIngressRequest = request => request.socket.remoteAddress === '172.30.32.2' || request.socket.remoteAddress === '::ffff:172.30.32.2',
+  utilityHistoryProvider = async () => ({ available: false, series: { hours24: [], days7: [], days30: [] } }),
+  dailyRecapProvider = async () => ({ available: false, complete: false, rows: [] }),
+  batterySwitchProvider = async () => { throw new Error('Accubediening niet beschikbaar.'); },
+  solarLimitProvider = async () => { throw new Error('Omvormerbediening niet beschikbaar.'); } }) {
   const app = express();
   app.disable('x-powered-by');
   app.use((request, response, next) => {
     response.setHeader('X-Content-Type-Options', 'nosniff');
     response.setHeader('Referrer-Policy', 'no-referrer');
     response.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'");
-    if (supervisor && request.socket.remoteAddress !== '172.30.32.2' && request.socket.remoteAddress !== '::ffff:172.30.32.2') {
+    if (supervisor && !isIngressRequest(request)) {
       return response.status(403).json({ error: 'Gebruik de Home Assistant-interface.' });
     }
     if (!['GET', 'HEAD'].includes(request.method)) {
@@ -67,6 +72,45 @@ export function createApp({ store, entitiesProvider, demo = false, supervisor = 
       return response.json(recap);
     } catch (error) {
       return response.status(503).json({ error: error.message || 'Dagrecap niet beschikbaar.' });
+    }
+  });
+  app.post('/api/battery/enable', async (request, response) => {
+    const body = z.object({ enabled: z.boolean(), confirm: z.literal(true) }).strict().safeParse(request.body);
+    if (!body.success) return response.status(400).json({ error: 'Bevestig de gewenste accustand.' });
+    if (!supervisor || demo || !runner?.status().activeAllowed) return response.status(403).json({ error: 'Accubediening vereist vrijgave in de Home Assistant-app.' });
+    const entityId = store.get().mappings.batteryEnable;
+    if (!entityId) return response.status(409).json({ error: 'Koppel eerst een accuschakelaar.' });
+    try {
+      const connection = await entitiesProvider();
+      const actuator = connection.entities.find(entity => entity.id === entityId);
+      if (!connection.connected || !isFresh(actuator, Date.now(), store.get().control.maxAgeSeconds) || actuator.domain !== 'switch' || !['on', 'off'].includes(actuator.state)) {
+        return response.status(409).json({ error: 'De accuschakelaar ontbreekt, is niet recent of heeft geen geldige status.' });
+      }
+      await batterySwitchProvider(entityId, body.data.enabled);
+      return response.json({ entityId, enabled: body.data.enabled });
+    } catch (error) {
+      return response.status(503).json({ error: error.message || 'Accubediening mislukt.' });
+    }
+  });
+  app.post('/api/solar/limit', async (request, response) => {
+    const body = z.object({ value: z.number().finite().min(0).max(100), confirm: z.literal(true) }).strict().safeParse(request.body);
+    if (!body.success) return response.status(400).json({ error: 'Bevestig een productielimiet tussen 0 en 100%.' });
+    const snapshot = store.get();
+    if (!supervisor || demo || !runner?.status().activeAllowed || snapshot.control.mode !== 'active') return response.status(403).json({ error: 'Omvormerbediening vereist vrijgave en actieve regels in de Home Assistant-app.' });
+    const entityId = snapshot.mappings.solarLimit;
+    if (!entityId) return response.status(409).json({ error: 'Koppel eerst een productielimiet voor de omvormer.' });
+    try {
+      const connection = await entitiesProvider();
+      const actuator = connection.entities.find(entity => entity.id === entityId);
+      if (!connection.connected || !isFresh(actuator, Date.now(), snapshot.control.maxAgeSeconds) || actuator.domain !== 'number' || actuator.unit !== '%' ||
+        !Number.isFinite(actuator.minimum) || actuator.minimum > 0 || !Number.isFinite(actuator.maximum) || actuator.maximum < 100 ||
+        !Number.isFinite(actuator.step) || actuator.step <= 0 || Math.abs((body.data.value - actuator.minimum) / actuator.step - Math.round((body.data.value - actuator.minimum) / actuator.step)) > 0.000001) {
+        return response.status(409).json({ error: 'De gekoppelde omvormerlimiet ontbreekt, is niet recent of ondersteunt deze waarde/stap niet.' });
+      }
+      await solarLimitProvider(entityId, body.data.value);
+      return response.json({ entityId, value: body.data.value });
+    } catch (error) {
+      return response.status(503).json({ error: error.message || 'Omvormerbediening mislukt.' });
     }
   });
   app.put('/api/mappings', async (request, response) => {
@@ -160,11 +204,13 @@ export async function startServer(env = process.env) {
   const dailyRecapProvider = demo
     ? async mappings => demoDailyRecap(recapMeters(mappings, demoEntities()))
     : async mappings => readDailyRecap(env, recapMeters(mappings, (await entitiesProvider()).entities));
+  const batterySwitchProvider = (entityId, enabled) => executeRuleCommand({ entityId, service: `switch.turn_${enabled ? 'on' : 'off'}` }, controlEnv);
+  const solarLimitProvider = (entityId, value) => executeRuleCommand({ entityId, service: 'number.set_value', value }, controlEnv);
   const runner = createRuleRunner({ store, provider: entitiesProvider, demo,
     unitProvider: demo ? async () => '°C' : () => readTemperatureUnit(env),
     activeAllowed: supervisor && controlEnv.CONTROL_ENABLED === 'true' && !demo,
     execute: command => executeRuleCommand(command, controlEnv) });
-  const app = createApp({ store, demo, supervisor, entitiesProvider, runner, utilityHistoryProvider, dailyRecapProvider });
+  const app = createApp({ store, demo, supervisor, entitiesProvider, runner, utilityHistoryProvider, dailyRecapProvider, batterySwitchProvider, solarLimitProvider });
   const server = app.listen(8080, env.HOST || (supervisor ? '0.0.0.0' : '127.0.0.1'), () => {
     runner.start();
     const mode = demo ? 'demo' : runner.status().activeAllowed ? 'sturing toegestaan' : 'regels standaard uit';

@@ -310,3 +310,50 @@ test('Warmte heeft eigen modus, demo weigert actief en pauze laat Stroom intact'
   assert.equal(store.get().thermal.mode, 'off');
   assert.equal(store.get().control.mode, 'preview');
 });
+
+test('kamer-aanwezigheid accepteert en leest een person-entiteit', () => {
+  const entities = demoEntities();
+  const thermal = thermalSchema.parse({ sources: [], rooms: [{
+    id: 'living', name: 'Woonkamer', floor: 'Begane grond', temperatureEntity: 'sensor.demo_temperature',
+    presenceEntity: 'person.demo_one', targetC: 21, presenceControl: true, sourceIds: []
+  }] });
+  assert.doesNotThrow(() => validateThermal(thermal, entities));
+  const room = thermalReadings(thermal, entities, defaultPreferences).rooms[0];
+  assert.equal(room.occupied, true);
+});
+
+test('handmatige accubediening vereist Supervisor-vrijgave en expliciete bevestiging', async context => {
+  let command;
+  const { url, store } = await fixture(context, {
+    demo: false,
+    supervisor: true,
+    isIngressRequest: () => true,
+    entitiesProvider: async () => ({ connected: true, entities: demoEntities() }),
+    runner: { status: () => ({ activeAllowed: true }) },
+    batterySwitchProvider: async (entityId, enabled) => { command = { entityId, enabled }; }
+  });
+  await store.update({ mappings: { ...emptyMappings, batteryEnable: 'switch.demo_battery_enable' } });
+  const response = await fetch(`${url}/api/battery/enable`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: true, confirm: true }) });
+  assert.equal(response.status, 200);
+  assert.deepEqual(command, { entityId: 'switch.demo_battery_enable', enabled: true });
+  const unconfirmed = await fetch(`${url}/api/battery/enable`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: false }) });
+  assert.equal(unconfirmed.status, 400);
+});
+
+test('omvormerslider vereist actieve vrijgave, bevestiging en geldige stap', async context => {
+  let command;
+  const { url, store } = await fixture(context, {
+    demo: false,
+    supervisor: true,
+    isIngressRequest: () => true,
+    entitiesProvider: async () => ({ connected: true, entities: demoEntities() }),
+    runner: { status: () => ({ activeAllowed: true }) },
+    solarLimitProvider: async (entityId, value) => { command = { entityId, value }; }
+  });
+  await store.update({ mappings: { ...emptyMappings, solarLimit: 'number.demo_pv_limit' }, control: { ...defaultRules, mode: 'active' } });
+  const response = await fetch(`${url}/api/solar/limit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: 70, confirm: true }) });
+  assert.equal(response.status, 200);
+  assert.deepEqual(command, { entityId: 'number.demo_pv_limit', value: 70 });
+  const unconfirmed = await fetch(`${url}/api/solar/limit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: 60 }) });
+  assert.equal(unconfirmed.status, 400);
+});

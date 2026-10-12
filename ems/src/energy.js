@@ -52,7 +52,8 @@ export function energySummary(mappings, entities) {
   const phaseLoads = [1, 2, 3].map(phase => {
     const currentA = phaseValue(`phase${phase}Current`);
     const voltageV = phaseValue(`phase${phase}Voltage`);
-    return { phase: `L${phase}`, currentA, voltageV, apparentPowerVA: currentA === null || voltageV === null ? null : currentA * voltageV };
+    const activePowerKw = get(`phase${phase}Power`);
+    return { phase: `L${phase}`, currentA, voltageV, activePowerKw, apparentPowerVA: currentA === null || voltageV === null ? null : currentA * voltageV };
   });
   const aggregate = mappings.knownSource === 'aggregate';
   const knownKw = aggregate ? get('knownConsumption') : consumers.length && consumers.every(item => item.powerKw !== null) ? consumers.reduce((sum, item) => sum + item.powerKw, 0) : null;

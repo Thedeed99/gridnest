@@ -249,6 +249,20 @@ footer { display: flex; justify-content: space-between; gap: 12px; font-size: 10
 .daily-recap-list { list-style: none; margin: 0; padding: 0; }
 .daily-recap-row { display: flex; justify-content: space-between; gap: 20px; border-top: 1px solid var(--line); padding: 12px 0; font-size: 12px; }
 .daily-recap-row strong { flex-shrink: 0; }
+.unit-toggle { width: 44px; font-size: 11px; font-weight: 800; }
+.device-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 8px 0 24px; }
+.device-metric { display: grid; gap: 10px; align-content: start; min-width: 0; min-height: 92px; padding: 14px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+.device-metric .metric-label { font-size: 11px; }
+.device-metric .metric-label svg { width: 16px; height: 16px; }
+.device-metric > strong { font-size: 22px; line-height: 1.15; overflow-wrap: anywhere; }
+.battery-control-section, .solar-control-section { border-top: 1px solid var(--line); padding: 20px 0; margin-bottom: 18px; }
+.battery-control-section > .section-heading { margin-bottom: 14px; }
+.battery-control-section > .primary-button, .solar-control-section > .secondary-button { margin-top: 10px; }
+.battery-control-section > .muted { font-size: 11px; margin-top: 10px; }
+.solar-control-section h2 { margin-bottom: 8px; }
+.solar-limit-control { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px 16px; margin: 18px 0 8px; font-size: 12px; font-weight: 600; }
+.solar-limit-control .solar-limit-value { color: var(--green); font-size: 16px; }
+.solar-limit-slider { grid-column: 1 / -1; width: 100%; min-height: 24px; accent-color: var(--yellow); }
 @media (max-width: 680px) {
 	.sidebar { padding: 24px 18px !important; border-right: 1px solid var(--line) !important; border-bottom: 0 !important; }
 	.sidebar nav { display: grid !important; grid-template-columns: minmax(0, 1fr) !important; gap: 8px !important; margin-top: 32px !important; }
@@ -257,12 +271,22 @@ footer { display: flex; justify-content: space-between; gap: 12px; font-size: 10
 }
 .phase-loads { border-top: 1px solid var(--line); margin-top: 18px; padding-top: 18px; }
 .phase-loads h3 { font-size: 13px; margin: 0 0 12px; }
-.phase-load-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
-.phase-load-row { min-width: 0; border: 1px solid var(--line); border-radius: 6px; padding: 12px; background: var(--surface); }
-.phase-load-row > strong { color: var(--green); font-size: 12px; }
-.phase-load-values { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 12px; margin-top: 10px; font-size: 11px; }
-.phase-load-values strong { grid-column: 1 / -1; font-size: 14px; }
+.phase-load-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.phase-load-row { display: grid; grid-template-rows: auto auto 1fr; gap: 5px; min-width: 0; border: 1px solid var(--line); border-radius: 6px; padding: 10px; background: var(--surface); }
+.phase-load-row > strong { color: var(--green); font-size: 11px; }
+.phase-load-primary { display: block; font-size: 17px; font-weight: 800; line-height: 1.25; }
+.phase-load-values { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: center; gap: 6px; margin-top: 2px; font-size: 10px; }
+.phase-load-reading { display: grid; gap: 2px; min-width: 0; }
+.phase-load-reading { display: block; color: var(--muted); font-size: 9px; white-space: nowrap; }
 .phase-loads > .muted { font-size: 11px; margin: 10px 0 0; }
+.solar-outlook { border-top: 1px solid var(--line); margin-top: 16px; padding-top: 14px; }
+.solar-outlook h3 { font-size: 12px; margin: 0 0 10px; }
+.solar-outlook-row { display: grid; grid-template-columns: 72px minmax(0, 1fr); align-items: center; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); }
+.solar-period { font-size: 11px; }
+.solar-outlook-values { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.solar-outlook-value { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; min-width: 0; font-size: 10px; }
+.solar-outlook-value > span:first-child { color: var(--muted); }
+.solar-outlook-value strong, .solar-actual-today { font-size: 11px; text-align: right; }
 .utility-panel { border-top: 1px solid var(--line); padding: 24px 0; }
 .utility-panel > .section-heading { margin-bottom: 14px; }
 .utility-current { display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: 4px 16px; padding: 14px 0; border-block: 1px solid var(--line); }
@@ -274,9 +298,19 @@ footer { display: flex; justify-content: space-between; gap: 12px; font-size: 10
 .utility-chart-section h3 { font-size: 13px; margin: 0 0 12px; }
 .utility-chart { position: relative; height: 220px; min-width: 0; }
 @media (max-width: 680px) {
-	.phase-load-grid { grid-template-columns: minmax(0, 1fr); }
-	.phase-load-values { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-	.phase-load-values strong { grid-column: auto; }
+	.phase-load-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+	.phase-load-row { padding: 7px; }
+	.phase-load-primary { font-size: 14px; }
+	.phase-load-values { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; }
+	.phase-load-reading { font-size: 8px; }
+	.solar-outlook-row { grid-template-columns: 54px minmax(0, 1fr); gap: 6px; }
+	.solar-outlook-values { gap: 6px; }
+	.solar-outlook-value { align-items: start; flex-direction: column; gap: 3px; font-size: 9px; }
+	.solar-outlook-value strong, .solar-actual-today { font-size: 10px; text-align: left; }
+	.device-metrics { gap: 8px; }
+	.device-metric { min-height: 82px; padding: 11px; }
+	.device-metric > strong { font-size: 18px; }
+	.unit-toggle { width: 40px; }
 	.utility-chart { height: 190px; }
 	.sidebar { position: fixed; z-index: 21; inset: 0 auto 0 0; width: min(82vw, 300px); padding: 24px 18px; border-right: 1px solid var(--line); border-bottom: 0; box-shadow: 12px 0 36px #10251d30; transform: translateX(-105%); transition: transform 180ms ease; }
 	.sidebar.is-open { transform: translateX(0); }

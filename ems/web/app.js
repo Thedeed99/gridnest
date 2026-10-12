@@ -1,11 +1,15 @@
-import { createIcons, Activity, Link, SlidersHorizontal, RefreshCw, HousePlug, House, Sun, Moon, Flame, Droplet, Plug, Car, Heater, BatteryCharging, Thermometer, ArrowUpRight, Save, Search, Check, Unplug, Plus, Pencil, Trash2, X, ListChecks, Pause, Play, Menu } from 'lucide';
+import { createIcons, Activity, Link, SlidersHorizontal, RefreshCw, HousePlug, House, Sun, Moon, Flame, Droplet, Plug, Car, Heater, BatteryCharging, Thermometer, ArrowUpRight, ArrowDownLeft, Lock, Clock3, Save, Search, Check, Unplug, Plus, Pencil, Trash2, X, ListChecks, Pause, Play, Menu } from 'lucide';
 import { Chart } from 'chart.js/auto';
 import { createId } from './ids.js';
+import { modeLabel } from './status.js';
+import { formatPower } from './power.js';
 
-const icons = { Activity, Link, SlidersHorizontal, RefreshCw, HousePlug, House, Sun, Moon, Flame, Droplet, Plug, Car, Heater, BatteryCharging, Thermometer, ArrowUpRight, Save, Search, Check, Unplug, Plus, Pencil, Trash2, X, ListChecks, Pause, Play, Menu };
+const icons = { Activity, Link, SlidersHorizontal, RefreshCw, HousePlug, House, Sun, Moon, Flame, Droplet, Plug, Car, Heater, BatteryCharging, Thermometer, ArrowUpRight, ArrowDownLeft, Lock, Clock3, Save, Search, Check, Unplug, Plus, Pencil, Trash2, X, ListChecks, Pause, Play, Menu };
 const main = document.querySelector('#main');
 let data;
 let view = 'overview';
+let powerUnit = 'kW';
+try { powerUnit = localStorage.getItem('gridnest-power-unit') === 'W' ? 'W' : 'kW'; } catch {}
 let mappingsDraft;
 let preferencesDraft;
 let controlDraft;
@@ -28,7 +32,9 @@ const element = (tag, className, text) => {
   return node;
 };
 const number = value => new Intl.NumberFormat('nl-NL', { maximumFractionDigits: 1 }).format(value);
-const powerText = value => value === null || value === undefined ? 'Niet beschikbaar' : `${new Intl.NumberFormat('nl-NL', { maximumFractionDigits: 2 }).format(value)} kW`;
+function powerText(value) {
+  return formatPower(value, powerUnit);
+}
 const formatTime = value => new Intl.DateTimeFormat('nl-NL', { timeZone: 'Europe/Amsterdam', hour: '2-digit', minute: '2-digit' }).format(new Date(value));
 function measurement(role) {
   if (role === 'presence' && data.preferences.presenceEntities?.length) return data.householdPresence?.occupied === true ? 'Aanwezig' : data.householdPresence?.occupied === false ? 'Afwezig' : 'Onbekend';
@@ -37,10 +43,17 @@ function measurement(role) {
   if (role === 'totalConsumption') return powerText(data.energy?.totalKw);
   const reading = data.readings.find(item => item.role === role);
   if (!reading?.valid) return 'Niet beschikbaar';
-  if (reading.unit === 'W') return `${number(Number(reading.value) / 1000)} kW`;
+  if (role === 'evSessionEnergy') {
+    const value = Number(reading.value);
+    if (!Number.isFinite(value)) return 'Niet beschikbaar';
+    return `${number(reading.unit === 'Wh' ? value / 1000 : value)} kWh`;
+  }
+  if (['W', 'kW'].includes(reading.unit)) return powerText(Number(reading.value) / (reading.unit === 'W' ? 1000 : 1));
   if (reading.unit) return `${number(Number(reading.value))} ${reading.unit}`;
+  if (role === 'evCableStatus') return reading.value === 'on' ? 'Kabel aangesloten' : reading.value === 'off' ? 'Kabel los' : reading.value;
+  if (role === 'batteryEnable') return reading.value === 'on' ? 'Accu actief' : reading.value === 'off' ? 'Stand-by' : reading.value;
   if (role === 'presence') return reading.value === 'on' ? 'Aanwezig' : 'Afwezig';
-  const states = { heat: 'Verwarmen', cool: 'Koelen', auto: 'Automatisch', off: 'Uit' };
+  const states = { heat: 'Verwarmen', cool: 'Koelen', auto: 'Automatisch', off: 'Uit', on: 'Aan', locked: 'Vergrendeld', unlocked: 'Ontgrendeld', connected: 'Aangesloten', disconnected: 'Losgekoppeld', plugged: 'Aangesloten', unplugged: 'Losgekoppeld' };
   return states[reading.value] || reading.value;
 }
 
@@ -63,9 +76,9 @@ async function api(path, options = {}) {
 function syncDeviceNavigation() {
   const rules = data.control?.rules ?? [];
   const visibility = {
-    ev: Boolean(data.mappings.evPower || rules.some(rule => ['ev_enable', 'ev_current'].includes(rule.action.type))),
-    battery: data.mappings.batteryMode === 'measured' || Boolean(data.mappings.batterySoc || data.mappings.batteryHealth) || rules.some(rule => rule.action.type === 'battery_power'),
-    solar: Boolean(data.mappings.solar || data.mappings.knownSource === 'aggregate' && data.mappings.knownConsumption)
+      ev: Boolean(['evPower', 'evCableStatus', 'evLockStatus', 'evSessionEnergy', 'evPhase1Current', 'evPhase2Current', 'evPhase3Current'].some(role => data.mappings[role]) || rules.some(rule => ['ev_enable', 'ev_current'].includes(rule.action.type))),
+      battery: data.mappings.batteryMode === 'measured' || Boolean(data.mappings.batterySoc || data.mappings.batteryHealth || data.mappings.batteryEnable || data.mappings.batteryInputPower || data.mappings.batteryOutputPower || data.mappings.batteryRemainingTime) || rules.some(rule => rule.action.type === 'battery_power'),
+      solar: Boolean(data.mappings.solar || data.mappings.solarExpectedNow || data.mappings.solarExpectedToday || data.mappings.solarLimit || rules.some(rule => rule.action.type === 'pv_limit'))
   };
   for (const [device, visible] of Object.entries(visibility)) {
     document.querySelector(`[data-view="${device}"]`).hidden = !visible;
@@ -87,11 +100,11 @@ async function refresh() {
     mappingsDraft ??= { ...data.mappings };
     preferencesDraft ??= { ...data.preferences };
     controlDraft ??= structuredClone(data.control);
-    document.querySelector('#mode-label').textContent = `v0.1 · ${{ off: 'Regels uit', preview: 'Proefmodus', active: 'Actieve regels' }[data.control?.mode] ?? 'Regels uit'}`;
+    document.querySelector('#mode-label').textContent = `v0.1 · ${modeLabel({ demo: data.demo, activeAllowed: data.controlStatus?.activeAllowed, mode: data.control?.mode })}`;
     document.querySelector('#connection').textContent = data.demo ? 'Voorbeeldwoning · Demodata' : data.message;
     document.querySelector('#connection').className = data.demo ? 'demo-status' : data.connected ? 'connected-status' : 'offline-status';
     document.querySelector('#timestamp').textContent = `Opgehaald om ${formatTime(data.fetchedAt)}`;
-    if (['overview', 'thermal'].includes(view) || main.getAttribute('aria-busy') === 'true') render();
+    if (['overview', 'thermal', 'ev', 'battery', 'solar'].includes(view) || main.getAttribute('aria-busy') === 'true') render();
     else if (view === 'rules') updateRuleStatus();
   } catch (error) {
     document.querySelector('#connection').textContent = 'Verbinding met EMS verbroken';
@@ -122,15 +135,28 @@ function solarOutlook(parent) {
   section.append(element('h3', '', 'Zonne-opbrengst · verwachting en werkelijk'));
   if (hasNow) {
     const row = element('div', 'solar-outlook-row');
-    row.append(element('strong', '', 'Nu'), element('span', '', `Verwacht ${powerText(outlook.expectedNowKw)}`), element('span', '', `Actueel ${powerText(outlook.actualNowKw)}`));
+    row.append(element('strong', 'solar-period', 'Nu'));
+    const values = element('div', 'solar-outlook-values');
+    for (const [label, value] of [['Verwacht', powerText(outlook.expectedNowKw)], ['Actueel', powerText(outlook.actualNowKw)]]) {
+      const item = element('div', 'solar-outlook-value');
+      item.append(element('span', '', label), element('strong', '', value));
+      values.append(item);
+    }
+    row.append(values);
     section.append(row);
   }
   if (hasToday) {
     const row = element('div', 'solar-outlook-row');
-    row.append(element('strong', '', 'Vandaag'), element('span', '', `Verwacht ${outlook.expectedTodayKwh === null ? 'niet beschikbaar' : `${number(outlook.expectedTodayKwh)} kWh`}`));
+    row.append(element('strong', 'solar-period', 'Vandaag'));
+    const values = element('div', 'solar-outlook-values');
+    const expected = element('div', 'solar-outlook-value');
+    expected.append(element('span', '', 'Verwacht'), element('strong', '', outlook.expectedTodayKwh === null ? 'Niet beschikbaar' : `${number(outlook.expectedTodayKwh)} kWh`));
     const actual = element('span', 'solar-actual-today', 'Werkelijk dagtotaal ophalen…');
     actual.id = 'solar-actual-today';
-    row.append(actual);
+    const actualValue = element('div', 'solar-outlook-value');
+    actualValue.append(element('span', '', 'Werkelijk'), actual);
+    values.append(expected, actualValue);
+    row.append(values);
     section.append(row);
   }
   parent.append(section);
@@ -164,7 +190,7 @@ function overview() {
   }
   section.append(sectionHeader, flow);
   solarOutlook(section);
-  const phases = (data.energy?.phaseLoads ?? []).filter((item, index) => data.mappings[`phase${index + 1}Current`] || data.mappings[`phase${index + 1}Voltage`]);
+  const phases = (data.energy?.phaseLoads ?? []).filter((item, index) => data.mappings[`phase${index + 1}Current`] || data.mappings[`phase${index + 1}Voltage`] || data.mappings[`phase${index + 1}Power`]);
   if (phases.length) {
     const phaseSection = element('section', 'phase-loads');
     phaseSection.append(element('h3', '', 'Per fase'));
@@ -173,9 +199,19 @@ function overview() {
       const row = element('div', 'phase-load-row');
       row.append(element('strong', '', phase.phase));
       const values = element('div', 'phase-load-values');
-      values.append(element('span', '', phase.currentA === null ? '— A' : `${number(phase.currentA)} A`));
-      values.append(element('span', '', phase.voltageV === null ? '— V' : `${number(phase.voltageV)} V`));
-      values.append(element('strong', '', phase.apparentPowerVA === null ? '— VA' : `${number(phase.apparentPowerVA)} VA`));
+      const activePower = phase.activePowerKw;
+      values.classList.add('phase-load-details');
+      const primary = activePower === null
+        ? phase.apparentPowerVA === null ? '—' : `${number(phase.apparentPowerVA)} VA`
+        : `${powerText(activePower)}`;
+      row.append(element('span', 'phase-load-primary', primary));
+      for (const [label, value] of [['Stroom', phase.currentA === null ? '— A' : `${number(phase.currentA)} A`], ['Spanning', phase.voltageV === null ? '— V' : `${number(phase.voltageV)} V`]]) {
+        const detail = element('span', 'phase-load-reading');
+        detail.textContent = value;
+        detail.title = label;
+        detail.setAttribute('aria-label', `${label}: ${value}`);
+        values.append(detail);
+      }
       row.append(values);
       rows.append(row);
     }
@@ -236,7 +272,7 @@ function consumptionSplit() {
 async function loadDailyRecap(container, reload = false, filter = null) {
   try {
     const mappingsKey = JSON.stringify(data.mappings);
-    if (reload || !dailyRecapCache || dailyRecapCache.mappingsKey !== mappingsKey || Date.now() - dailyRecapCache.fetchedAt > 300000) {
+    if (reload || !dailyRecapCache || dailyRecapCache.mappingsKey !== mappingsKey || Date.now() - dailyRecapCache.fetchedAt > 30000) {
       dailyRecapCache = { ...await api('daily-recap'), fetchedAt: Date.now(), mappingsKey };
     }
     if (!document.body.contains(container)) return;
@@ -246,8 +282,8 @@ async function loadDailyRecap(container, reload = false, filter = null) {
     if (solarActual) {
       const solarRow = recap.rows.find(row => row.label === 'Zonnepanelen');
       solarActual.textContent = solarRow?.energyKwh === null || solarRow?.energyKwh === undefined
-        ? 'Werkelijk vandaag: onvolledig'
-        : `Werkelijk vandaag: ${number(solarRow.energyKwh)} kWh`;
+        ? 'Onvolledig'
+        : `${number(solarRow.energyKwh)} kWh`;
     }
     const rows = filter ? recap.rows.filter(row => filter(row)) : recap.rows;
     if (!rows.length) {
@@ -497,7 +533,7 @@ function editThermal(kind, id = null, floor = '') {
     floorSelect.value = original?.floor || floor || 'Begane grond';
     addField('floor', 'Verdieping', floorSelect);
     entityField('temperatureEntity', 'Temperatuursensor', original?.temperatureEntity, entity => entity.domain === 'sensor' && entity.unit === '°C');
-    entityField('presenceEntity', 'Aanwezigheidssensor', original?.presenceEntity, entity => entity.domain === 'binary_sensor' && ['occupancy', 'presence'].includes(entity.deviceClass));
+    entityField('presenceEntity', 'Aanwezigheidssensor', original?.presenceEntity, entity => ['person', 'device_tracker'].includes(entity.domain) || entity.domain === 'binary_sensor' && ['occupancy', 'presence'].includes(entity.deviceClass));
     const presenceLabel = element('label', 'checkbox-field');
     const presenceControl = element('input');
     presenceControl.type = 'checkbox'; presenceControl.name = 'presenceControl'; presenceControl.checked = original?.presenceControl ?? false;
@@ -801,9 +837,12 @@ function rulesView() {
   updateRuleStatus();
 }
 
-function editRule(id = null) {
+function editRule(id = null, presetType = 'ev_enable') {
   const original = data.control.rules.find(rule => rule.id === id);
-  const draft = original ? structuredClone(original) : { id: createId(), name: '', priority: 50, enabled: false, confirmed: false, conditions: [{ entityId: '', operator: 'gt', value: 0 }], action: { type: 'ev_enable', entityId: '', value: 'on', otherwise: 'off', batteryDirection: 'positive-charge' } };
+  const initialAction = presetType === 'pv_limit' ? { type: presetType, entityId: data.mappings.solarLimit ?? '', value: 70, otherwise: 100, batteryDirection: 'positive-charge' }
+    : presetType === 'battery_power' ? { type: presetType, entityId: '', value: 500, otherwise: 0, batteryDirection: 'positive-charge' }
+      : { type: 'ev_enable', entityId: '', value: 'on', otherwise: 'off', batteryDirection: 'positive-charge' };
+  const draft = original ? structuredClone(original) : { id: createId(), name: presetType === 'pv_limit' ? 'Omvormer begrenzen' : '', priority: 50, enabled: false, confirmed: false, conditions: [{ entityId: '', operator: 'gt', value: 0 }], action: initialAction };
   const dialog = element('dialog', 'thermal-dialog rule-dialog');
   dialog.setAttribute('aria-label', original ? 'Stroomregel bewerken' : 'Stroomregel toevoegen');
   const form = element('form');
@@ -1013,7 +1052,10 @@ function entities() {
       const label = element('label', 'entity-label');
       label.htmlFor = `entity-${role.id}`;
       const copy = element('span');
-      copy.append(element('strong', '', role.name), element('small', '', role.units.length ? role.units.join(' / ') : role.domain === 'climate' ? 'Climate-entiteit' : 'Aanwezigheidssensor'));
+      const roleHint = role.units.length ? role.units.join(' / ') : role.domain === 'climate' ? 'Climate-entiteit'
+        : role.domain === 'binary_sensor' ? 'Statussensor' : role.domain === 'lock' ? 'Vergrendeling'
+          : role.domain === 'switch' ? 'Schakelaar' : 'Status';
+      copy.append(element('strong', '', role.name), element('small', '', roleHint));
       if (role.id === 'totalConsumption') copy.append(element('small', '', 'Optioneel bij complete energiebalans'));
       label.append(icon(role.icon), copy);
       const select = element('select');
@@ -1273,7 +1315,7 @@ async function drawUtilityCharts(utility, status, entityId, reload = false) {
   try {
     const cacheKey = `${utility}:${entityId}`;
     let cached = utilityHistoryCache[cacheKey];
-    if (reload || !cached || Date.now() - cached.fetchedAt > 300000) {
+    if (reload || !cached || Date.now() - cached.fetchedAt > 30000) {
       cached = { ...(await api(`utility-history/${utility}`)), fetchedAt: Date.now() };
       utilityHistoryCache[cacheKey] = cached;
     }
@@ -1381,9 +1423,9 @@ function utilityPanel(utility) {
 
 function deviceDetail(kind) {
   const definitions = {
-    ev: { title: 'Laadpaal', subtitle: 'Gekoppelde laadpaalmetingen', metrics: [['evPower', 'Laadvermogen', 'car']], filter: row => row.label === 'Laadpaal' },
-    battery: { title: 'Accu', subtitle: 'Thuisbatterijmetingen', metrics: [['batterySoc', 'Laadtoestand', 'battery-charging'], ['batteryHealth', 'Accuhealth', 'activity'], ['batteryPower', 'Batterijvermogen', 'activity']], filter: row => row.label.startsWith('Batterij ') },
-    solar: { title: 'Zonnepanelen', subtitle: 'Productie en dagopbrengst', metrics: [['solar', 'Opwek nu', 'sun']], filter: row => row.label === 'Zonnepanelen' }
+    ev: { title: 'Laadpaal', subtitle: 'Gekoppelde laadpaalmetingen', metrics: [['evPower', 'Laadvermogen', 'car'], ['evCableStatus', 'Kabelstatus', 'plug'], ['evLockStatus', 'Vergrendeling', 'lock'], ['evSessionEnergy', 'Sessieverbruik', 'activity'], ['evPhase1Current', 'Laadstroom L1', 'activity'], ['evPhase2Current', 'Laadstroom L2', 'activity'], ['evPhase3Current', 'Laadstroom L3', 'activity']], filter: row => row.label === 'Laadpaal' },
+    battery: { title: 'Accu', subtitle: 'Thuisbatterijmetingen', metrics: [['batterySoc', 'Laadtoestand', 'battery-charging'], ['batteryHealth', 'Accuhealth', 'activity'], ['batteryInputPower', 'Input', 'activity'], ['batteryOutputPower', 'Output', 'arrow-up-right'], ['batteryRemainingTime', 'Resterende tijd', 'activity'], ['batteryPower', 'Batterijvermogen', 'activity']], filter: row => row.label.startsWith('Batterij ') },
+    solar: { title: 'Zonnepanelen', subtitle: 'Productie en dagopbrengst', metrics: [['solar', 'Opwek nu', 'sun'], ['solarExpectedNow', 'Verwacht vermogen nu', 'sun'], ['solarExpectedToday', 'Verwachte opbrengst vandaag', 'sun'], ['solarLimit', 'Productielimiet', 'sun']], filter: row => row.label === 'Zonnepanelen' }
   };
   const config = definitions[kind];
   heading(config.title, config.subtitle);
@@ -1399,6 +1441,71 @@ function deviceDetail(kind) {
     metrics.append(card);
   }
   if (metrics.childElementCount) main.append(metrics);
+  if (kind === 'battery') batteryControlPanel();
+  if (kind === 'solar') {
+    const pvRules = data.control.rules.filter(rule => rule.action.type === 'pv_limit');
+    const section = element('section', 'solar-control-section');
+    section.append(element('h2', '', 'Omvormer terugdimmen'));
+    const entity = data.entities.find(item => item.id === data.mappings.solarLimit);
+    if (!entity) {
+      section.append(element('p', 'subtitle', 'Koppel een 0–100%-productielimiet in Koppelingen om de slider te gebruiken.'));
+      const connect = element('button', 'secondary-button', 'Productielimiet koppelen');
+      connect.prepend(icon('link'));
+      connect.addEventListener('click', () => navigate('entities'));
+      section.append(connect);
+    } else {
+      section.append(element('p', 'subtitle', `Bedieningsentiteit: ${entity.name}`));
+      const sliderLabel = element('label', 'solar-limit-control');
+      sliderLabel.htmlFor = 'solar-limit-slider';
+      sliderLabel.append(element('span', '', 'Productielimiet'), element('strong', 'solar-limit-value', `${number(Number(entity.state))}%`));
+      const slider = element('input', 'solar-limit-slider');
+      slider.id = 'solar-limit-slider';
+      slider.type = 'range';
+      const supportsFullRange = Number.isFinite(entity.minimum) && entity.minimum <= 0 && Number.isFinite(entity.maximum) && entity.maximum >= 100;
+      slider.min = 0;
+      slider.max = 100;
+      slider.step = entity.step > 0 ? entity.step : 1;
+      slider.value = Number.isFinite(Number(entity.state)) ? Number(entity.state) : 100;
+      slider.disabled = !entity.available || !supportsFullRange || !Number.isFinite(entity.step) || entity.step <= 0;
+      slider.addEventListener('input', () => { sliderLabel.querySelector('.solar-limit-value').textContent = `${number(Number(slider.value))}%`; });
+      sliderLabel.append(slider);
+      section.append(sliderLabel);
+      const apply = element('button', 'primary-button', 'Limiet toepassen');
+      apply.prepend(icon('check'));
+      apply.disabled = slider.disabled || !data.controlStatus?.activeAllowed || data.control?.mode !== 'active';
+      apply.addEventListener('click', () => {
+        const dialog = element('dialog', 'thermal-dialog');
+        dialog.setAttribute('aria-label', 'Omvormerlimiet bevestigen');
+        dialog.append(element('h2', '', 'Productielimiet toepassen?'), element('p', '', `De omvormerlimiet wordt ingesteld op ${number(Number(slider.value))}%. 100% is volledige productie.`));
+        const actions = element('div', 'dialog-actions');
+        actions.append(toolButton('x', 'Annuleren', () => dialog.close()));
+        const confirm = element('button', 'primary-button', 'Limiet bevestigen');
+        confirm.prepend(icon('check'));
+        confirm.addEventListener('click', async () => {
+          confirm.disabled = true;
+          try {
+            await api('solar/limit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: Number(slider.value), confirm: true }) });
+            dialog.close();
+            notify('Omvormerlimiet ingesteld.');
+            await refresh();
+          } catch (error) { notify(error.message, true); confirm.disabled = false; }
+        });
+        actions.append(confirm);
+        dialog.append(actions);
+        dialog.addEventListener('close', () => dialog.remove());
+        document.body.append(dialog);
+        createIcons({ icons });
+        dialog.showModal();
+      });
+      section.append(apply);
+      if (!data.controlStatus?.activeAllowed || data.control?.mode !== 'active') section.append(element('p', 'muted', 'Toepassen vereist vrijgave voor echte apparaatsturing en de stand Actief.'));
+    }
+    const setup = element('button', 'secondary-button', pvRules.length ? 'Stroomregels openen' : 'Terugdimregel toevoegen');
+    setup.prepend(icon(pvRules.length ? 'list-checks' : 'sliders-horizontal'));
+    setup.addEventListener('click', () => { navigate('rules'); if (!pvRules.length) editRule(null, 'pv_limit'); });
+    section.append(setup);
+    main.append(section);
+  }
   const recap = element('section', 'daily-recap-section');
   const content = element('div', 'daily-recap-content');
   const reload = toolButton('refresh-cw', `${config.title}dagrecap vernieuwen`, () => loadDailyRecap(content, true, config.filter));
@@ -1407,9 +1514,61 @@ function deviceDetail(kind) {
   content.append(element('p', 'muted', 'Dagtotalen laden…'));
   main.append(recap);
   loadDailyRecap(content, false, config.filter);
-  if (!count && !data.control?.rules?.length) {
+  const hasBatterySwitch = kind === 'battery' && data.mappings.batteryEnable;
+  const hasRelatedRule = (kind === 'ev' && data.control.rules.some(rule => ['ev_enable', 'ev_current'].includes(rule.action.type))) ||
+    (kind === 'battery' && data.control.rules.some(rule => rule.action.type === 'battery_power')) ||
+    (kind === 'solar' && data.control.rules.some(rule => rule.action.type === 'pv_limit'));
+  if (!count && !hasBatterySwitch && !hasRelatedRule) {
     main.prepend(element('p', 'empty-state', 'Koppel eerst een passende entiteit om apparaatmetingen te tonen.'));
   }
+}
+
+function batteryControlPanel() {
+  if (!data.mappings.batteryEnable) {
+    const section = element('section', 'battery-control-section');
+    section.append(element('h2', '', 'Accu aan/uit'), element('p', 'subtitle', 'Koppel een accuschakelaar om deze vanaf Gridnest te bedienen.'));
+    const connect = element('button', 'secondary-button', 'Accuschakelaar koppelen');
+    connect.prepend(icon('link'));
+    connect.addEventListener('click', () => navigate('entities'));
+    section.append(connect);
+    main.append(section);
+    return;
+  }
+  const reading = data.readings.find(item => item.role === 'batteryEnable');
+  const enabled = reading?.valid && reading.value === 'on';
+  const section = element('section', 'battery-control-section');
+  const status = element('span', 'room-status', reading?.valid ? enabled ? 'Actief' : 'Stand-by' : 'Status onbekend');
+  const toggle = element('button', 'primary-button', enabled ? 'Accu uitschakelen' : 'Accu activeren');
+  toggle.prepend(icon(enabled ? 'pause' : 'play'));
+  toggle.disabled = !data.controlStatus?.activeAllowed || !reading?.valid;
+  toggle.addEventListener('click', () => {
+    const dialog = element('dialog', 'thermal-dialog');
+    const targetEnabled = !enabled;
+    dialog.setAttribute('aria-label', targetEnabled ? 'Accu activeren bevestigen' : 'Accu uitschakelen bevestigen');
+    dialog.append(element('h2', '', targetEnabled ? 'Accu activeren?' : 'Accu uitschakelen?'), element('p', '', 'Dit stuurt de gekoppelde schakelaar rechtstreeks aan. Controleer eerst dat de juiste accu-entiteit gekoppeld is.'));
+    const actions = element('div', 'dialog-actions');
+    actions.append(toolButton('x', 'Annuleren', () => dialog.close()));
+    const confirm = element('button', 'primary-button', targetEnabled ? 'Accu activeren' : 'Accu uitschakelen');
+    confirm.prepend(icon('check'));
+    confirm.addEventListener('click', async () => {
+      confirm.disabled = true;
+      try {
+        await api('battery/enable', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: targetEnabled, confirm: true }) });
+        dialog.close();
+        notify('Accuschakelaar aangestuurd.');
+        await refresh();
+      } catch (error) { notify(error.message, true); confirm.disabled = false; }
+    });
+    actions.append(confirm);
+    dialog.append(actions);
+    dialog.addEventListener('close', () => dialog.remove());
+    document.body.append(dialog);
+    createIcons({ icons });
+    dialog.showModal();
+  });
+  section.append(element('h2', '', 'Accubediening'), status, toggle);
+  if (!data.controlStatus?.activeAllowed) section.append(element('p', 'muted', 'Accubediening vereist vrijgave via Echte apparaatsturing in Home Assistant.'));
+  main.append(section);
 }
 
 function render() {
@@ -1450,6 +1609,18 @@ menuBackdrop.addEventListener('click', closeMobileMenu);
 document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', closeMobileMenu));
 document.addEventListener('keydown', event => { if (event.key === 'Escape') closeMobileMenu(); });
 const themeToggle = document.querySelector('#theme-toggle');
+const powerUnitToggle = document.querySelector('#power-unit-toggle');
+function applyPowerUnit() {
+  powerUnitToggle.textContent = powerUnit;
+  powerUnitToggle.setAttribute('aria-label', `${powerUnit === 'kW' ? 'Watt' : 'Kilowatt'} tonen`);
+}
+applyPowerUnit();
+powerUnitToggle.addEventListener('click', () => {
+  powerUnit = powerUnit === 'kW' ? 'W' : 'kW';
+  try { localStorage.setItem('gridnest-power-unit', powerUnit); } catch {}
+  applyPowerUnit();
+  if (['overview', 'ev', 'battery', 'solar'].includes(view)) render();
+});
 function applyTheme(theme, persist = false) {
   const dark = theme === 'dark';
   document.documentElement.dataset.theme = dark ? 'dark' : 'light';
@@ -1470,4 +1641,4 @@ themeToggle.addEventListener('click', () => {
 });
 createIcons({ icons });
 refresh();
-setInterval(refresh, 30000);
+setInterval(refresh, 10000);

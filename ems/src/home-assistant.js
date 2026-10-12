@@ -9,14 +9,28 @@ export const roles = [
   { id: 'temperature', name: 'Kamertemperatuur', domain: 'sensor', units: ['°C'], icon: 'thermometer', description: 'De temperatuur in de belangrijkste verblijfsruimte.' },
   { id: 'climate', name: 'Verwarming', domain: 'climate', units: [], icon: 'heater', description: 'Thermostaat of warmtepomp. In deze versie alleen uitlezen.' },
   { id: 'evPower', name: 'Laadpaal', domain: 'sensor', units: ['W', 'kW'], icon: 'car', description: 'Actueel laadvermogen; geen start- of stopopdracht.' },
+  { id: 'evCableStatus', name: 'Laadpaal · Kabelstatus', domain: 'binary_sensor', units: [], icon: 'plug', description: 'Status van de laadkabel.' },
+  { id: 'evLockStatus', name: 'Laadpaal · Vergrendeling', domain: 'lock', units: [], icon: 'lock', description: 'Vergrendelstatus van de laadkabel.' },
+  { id: 'evSessionEnergy', name: 'Laadpaal · Sessieverbruik', domain: 'sensor', units: ['Wh', 'kWh'], icon: 'activity', description: 'Energie geleverd tijdens de huidige laadsessie.' },
+  { id: 'evPhase1Current', name: 'Laadstroom L1', domain: 'sensor', units: ['A'], icon: 'activity', description: 'Laadstroom van de laadpaal op fase L1.' },
+  { id: 'evPhase2Current', name: 'Laadstroom L2', domain: 'sensor', units: ['A'], icon: 'activity', description: 'Laadstroom van de laadpaal op fase L2.' },
+  { id: 'evPhase3Current', name: 'Laadstroom L3', domain: 'sensor', units: ['A'], icon: 'activity', description: 'Laadstroom van de laadpaal op fase L3.' },
   { id: 'batterySoc', name: 'Thuisbatterij', domain: 'sensor', units: ['%'], icon: 'battery-charging', description: 'Laadtoestand van de batterij.' },
   { id: 'batteryHealth', name: 'Accuhealth', domain: 'sensor', units: ['%'], icon: 'activity', description: 'Gemeten gezondheid van de accu, als de integratie deze aanbiedt.' },
+  { id: 'batteryEnable', name: 'Accu · Activeren', domain: 'switch', units: [], icon: 'battery-charging', description: 'Optionele schakelaar om de accu te activeren.' },
+  { id: 'batteryInputPower', name: 'Accu · Input', domain: 'sensor', units: ['W', 'kW'], icon: 'arrow-down-left', description: 'Actueel opgenomen vermogen van de accu.' },
+  { id: 'batteryOutputPower', name: 'Accu · Output', domain: 'sensor', units: ['W', 'kW'], icon: 'arrow-up-right', description: 'Actueel afgegeven vermogen van de accu.' },
+  { id: 'batteryRemainingTime', name: 'Accu · Resterende tijd', domain: 'sensor', units: ['h', 'min', 's'], icon: 'clock-3', description: 'Geschatte resterende bedrijfstijd.' },
+  { id: 'solarLimit', name: 'Omvormer · Productielimiet', domain: 'number', units: ['%'], icon: 'sun', description: 'Optionele begrenzing van de omvormer in procenten.' },
   { id: 'phase1Current', name: 'Stroomsterkte L1', domain: 'sensor', units: ['A'], icon: 'activity', description: 'Actuele stroomsterkte op fase L1.' },
   { id: 'phase1Voltage', name: 'Spanning L1', domain: 'sensor', units: ['V'], icon: 'activity', description: 'Actuele spanning op fase L1.' },
+  { id: 'phase1Power', name: 'Vermogen L1', domain: 'sensor', units: ['W', 'kW'], icon: 'activity', description: 'Werkelijk gemeten vermogen op fase L1.' },
   { id: 'phase2Current', name: 'Stroomsterkte L2', domain: 'sensor', units: ['A'], icon: 'activity', description: 'Actuele stroomsterkte op fase L2.' },
   { id: 'phase2Voltage', name: 'Spanning L2', domain: 'sensor', units: ['V'], icon: 'activity', description: 'Actuele spanning op fase L2.' },
+  { id: 'phase2Power', name: 'Vermogen L2', domain: 'sensor', units: ['W', 'kW'], icon: 'activity', description: 'Werkelijk gemeten vermogen op fase L2.' },
   { id: 'phase3Current', name: 'Stroomsterkte L3', domain: 'sensor', units: ['A'], icon: 'activity', description: 'Actuele stroomsterkte op fase L3.' },
   { id: 'phase3Voltage', name: 'Spanning L3', domain: 'sensor', units: ['V'], icon: 'activity', description: 'Actuele spanning op fase L3.' },
+  { id: 'phase3Power', name: 'Vermogen L3', domain: 'sensor', units: ['W', 'kW'], icon: 'activity', description: 'Werkelijk gemeten vermogen op fase L3.' },
   { id: 'gasConsumption', name: 'Gasverbruik', domain: 'sensor', units: ['m³', 'm3'], icon: 'flame', description: 'Cumulatieve gasmeterstand in kubieke meters.' },
   { id: 'waterConsumption', name: 'Waterverbruik', domain: 'sensor', units: ['m³', 'm3'], icon: 'droplet', description: 'Cumulatieve watermeterstand in kubieke meters.' },
   { id: 'gridPower', name: 'Netvermogen (positief / negatief)', domain: 'sensor', units: ['W', 'kW'], icon: 'plug', description: 'Een getekende netsensor voor afname en teruglevering; stel de tekenrichting in.' },
@@ -33,7 +47,7 @@ const stateSchema = z.object({
 });
 
 export function normalizeStates(states) {
-  return z.array(stateSchema).parse(states).filter(state => ['sensor', 'binary_sensor', 'climate', 'number', 'switch', 'person', 'device_tracker'].includes(state.entity_id.split('.')[0])).map(state => ({
+  return z.array(stateSchema).parse(states).filter(state => ['sensor', 'binary_sensor', 'climate', 'number', 'switch', 'lock', 'person', 'device_tracker'].includes(state.entity_id.split('.')[0])).map(state => ({
     id: state.entity_id, name: typeof state.attributes.friendly_name === 'string' ? state.attributes.friendly_name : state.entity_id,
     domain: state.entity_id.split('.')[0], state: state.state,
     unit: typeof state.attributes.unit_of_measurement === 'string' ? state.attributes.unit_of_measurement : '',
