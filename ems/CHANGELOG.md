@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.6 - 2026-10-12
+
+- Centreer ampere en voltage samen onder het fasevermogen.
+- Geef Zonnepanelen de voorbeeldopmaak met productiestatus, uurstaafgrafiek, dimslider en vier opbrengstvelden.
+- Bereken de zonne-uurwaarden uit dezelfde historie als het dagtotaal; toon ontbrekende historie expliciet.
+- Voeg een optionele Wh/kWh-dagmeter voor Zonneopbrengst vandaag toe, met voorrang boven de historieschatting.
+- Gebruik dezelfde daadwerkelijke klimaatstatus in energiestromen en kamerbronnen; benoem modus apart wanneer activiteit ontbreekt.
+- Toon een aanwezigheidsbadge alleen bij een gekoppelde eigen kamersensor met bekende status; behoud huishoudelijke aanwezigheid voor optionele regeling.
+- Vervang de gas-totaalstand door verbruikstotalen bij de 24-uurs-, week- en 30-dagengrafiek, met expliciete onvolledige historie.
+- Voeg optionele bevestigde aan/uitschakelaars aan bekende verbruikers toe; uit rood, aan wit op basis van schakelstatus.
+- Geef water dezelfde opmaak en periodetotalen als gas, zonder cumulatieve totaalstand.
+- Beperk de dagrecap tot woningverbruik, teruglevering, laadpaal, batterij laden/ontladen en optionele gas/waterdagtotalen sinds middernacht.
+
 ## 0.1.5 - 2026-10-12
 
 - Werk kamer-aanwezigheid ook met person- en device_tracker-entiteiten; ververs zichtbare waarden elke 10 seconden.

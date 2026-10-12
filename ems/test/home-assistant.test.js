@@ -111,6 +111,24 @@ test('optionele EV-, accu- en zonnebediening koppelingen valideren domein en een
   assert.throws(() => validateMappings({ ...emptyMappings, solarLimit: 'sensor.ev_session' }, entities));
 });
 
+test('zonneopbrengst vandaag accepteert een Wh- of kWh-dagmeter, geen vermogenssensor', () => {
+  const entities = normalizeStates([state('sensor.solar_today', 'kWh', '0.21'), state('sensor.solar_today_wh', 'Wh', '210'), state('sensor.solar_power', 'W', '210')]);
+  assert.equal(validateMappings({ ...emptyMappings, solarToday: 'sensor.solar_today' }, entities).solarToday, 'sensor.solar_today');
+  assert.equal(validateMappings({ ...emptyMappings, solarToday: 'sensor.solar_today_wh' }, entities).solarToday, 'sensor.solar_today_wh');
+  assert.throws(() => validateMappings({ ...emptyMappings, solarToday: 'sensor.solar_power' }, entities));
+});
+
+test('bekende verbruikers kunnen alleen aan bestaande unieke schakelentiteiten worden gekoppeld', () => {
+  const entities = normalizeStates([state('sensor.fridge', 'W', '0'), state('sensor.dryer', 'W', '1'), state('switch.fridge', '', 'on')]);
+  const mappings = { ...emptyMappings, knownConsumers: ['sensor.fridge'], knownConsumerSwitches: { 'sensor.fridge': 'switch.fridge' } };
+  assert.equal(validateMappings(mappings, entities).knownConsumerSwitches['sensor.fridge'], 'switch.fridge');
+  assert.deepEqual(validateMappings({ ...emptyMappings }, entities).knownConsumerSwitches, {});
+  assert.throws(() => validateMappings({ ...mappings, knownConsumers: [] }, entities));
+  assert.throws(() => validateMappings({ ...mappings, knownConsumerSwitches: { 'sensor.fridge': 'sensor.fridge' } }, entities));
+  assert.throws(() => validateMappings({ ...mappings, knownConsumerSwitches: { 'sensor.fridge': 'switch.missing' } }, entities));
+  assert.throws(() => validateMappings({ ...mappings, knownConsumers: ['sensor.fridge', 'sensor.dryer'], knownConsumerSwitches: { 'sensor.fridge': 'switch.fridge', 'sensor.dryer': 'switch.fridge' } }, entities));
+});
+
 test('demo sensor identifiers blijven uniek', () => {
   const ids = demoEntities().map(entity => entity.id);
   assert.equal(new Set(ids).size, ids.length);

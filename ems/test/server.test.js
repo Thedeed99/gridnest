@@ -334,6 +334,32 @@ test('verversingsinterval wordt opgeslagen en ongeldige intervallen worden gewei
   assert.equal(store.get().preferences.refreshSeconds, 0);
 });
 
+test('verbruikerschakelaar vereist vrijgave, bevestiging, actuele stand en dezelfde koppeling', async context => {
+  const commands = [];
+  let entities = demoEntities();
+  const { url, store } = await fixture(context, {
+    demo: false, supervisor: true, isIngressRequest: () => true,
+    entitiesProvider: async () => ({ connected: true, entities }),
+    runner: { status: () => ({ activeAllowed: true }) },
+    consumerSwitchProvider: async (entityId, enabled) => { commands.push({ entityId, enabled }); }
+  });
+  const mappings = { ...emptyMappings, knownConsumers: ['sensor.demo_fridge_power'], knownConsumerSwitches: { 'sensor.demo_fridge_power': 'switch.demo_battery_enable' } };
+  await store.update({ mappings });
+  const send = body => fetch(`${url}/api/consumers/enable`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const body = { consumerId: 'sensor.demo_fridge_power', switchId: 'switch.demo_battery_enable', enabled: true, expectedState: 'off', confirm: true };
+  assert.equal((await send(body)).status, 403);
+  await store.update({ control: { ...defaultRules, mode: 'active' } });
+  assert.equal((await send({ ...body, confirm: false })).status, 400);
+  assert.equal((await send({ ...body, switchId: 'switch.demo_ev_enable' })).status, 409);
+  assert.equal((await send({ ...body, expectedState: 'on' })).status, 409);
+  assert.equal((await send(body)).status, 200);
+  entities = entities.map(entity => entity.id === body.switchId ? { ...entity, reportedAt: '2000-01-01T00:00:00Z' } : entity);
+  assert.equal((await send(body)).status, 409);
+  await store.update({ mappings: { ...mappings, knownSource: 'aggregate' } });
+  assert.equal((await send(body)).status, 409);
+  assert.deepEqual(commands, [{ entityId: body.switchId, enabled: true }]);
+});
+
 test('handmatige accubediening vereist Supervisor-vrijgave en expliciete bevestiging', async context => {
   let command;
   const { url, store } = await fixture(context, {

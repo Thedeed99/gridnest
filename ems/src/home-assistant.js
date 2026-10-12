@@ -4,6 +4,7 @@ export const roles = [
   { id: 'gridImport', name: 'Netafname', domain: 'sensor', units: ['W', 'kW'], icon: 'plug', description: 'Actueel vermogen uit het net; niet een cumulatieve kWh-meter.' },
   { id: 'gridExport', name: 'Teruglevering', domain: 'sensor', units: ['W', 'kW'], icon: 'arrow-up-right', description: 'Actueel teruggeleverd vermogen, als positieve waarde.' },
   { id: 'solar', name: 'Zonnepanelen', domain: 'sensor', units: ['W', 'kW'], icon: 'sun', description: 'Actuele productie van de omvormer.' },
+  { id: 'solarToday', name: 'Zonneopbrengst vandaag', domain: 'sensor', units: ['Wh', 'kWh'], icon: 'sun', description: 'Werkelijk opgewekte energie sinds middernacht; gebruik een dagmeter, geen levensduurtotaal.' },
   { id: 'solarExpectedNow', name: 'Zonneverwachting nu', domain: 'sensor', units: ['W', 'kW'], icon: 'sun', description: 'Verwacht zonnevermogen op dit moment uit je forecast-integratie.' },
   { id: 'solarExpectedToday', name: 'Zonneverwachting vandaag', domain: 'sensor', units: ['kWh'], icon: 'sun', description: 'Verwachte zonneopbrengst voor vandaag uit je forecast-integratie.' },
   { id: 'temperature', name: 'Kamertemperatuur', domain: 'sensor', units: ['°C'], icon: 'thermometer', description: 'De temperatuur in de belangrijkste verblijfsruimte.' },
@@ -85,7 +86,8 @@ export const mappingsSchema = z.object({
   batteryDirection: z.enum(['positive-charge', 'positive-discharge']).default('positive-charge'),
   knownSource: z.enum(['individual', 'aggregate']).default('individual'),
   knownConsumers: z.array(entityIdSchema).max(50).default([]).refine(ids => new Set(ids).size === ids.length, { message: 'Een verbruiker mag maar een keer worden geselecteerd.' }),
-  knownConsumerNames: z.record(entityIdSchema, z.string().trim().max(80)).default({})
+  knownConsumerNames: z.record(entityIdSchema, z.string().trim().max(80)).default({}),
+  knownConsumerSwitches: z.record(entityIdSchema, z.string().regex(/^switch\.[a-z0-9_]+$/)).default({})
 }).strict();
 export const emptyMappings = mappingsSchema.parse({});
 
@@ -106,6 +108,11 @@ export function validateMappings(input, entities) {
     if ([mappings.totalConsumption, mappings.knownConsumption, mappings.gridPower, mappings.gridImport, mappings.gridExport, mappings.solar, mappings.batteryPower].includes(id)) {
       throw new Error('Selecteer apparaatmetingen, geen woning-, net-, batterij- of productiemeter als bekende verbruiker.');
     }
+  }
+  const switches = Object.entries(mappings.knownConsumerSwitches);
+  if (new Set(switches.map(([, id]) => id)).size !== switches.length) throw new Error('Koppel elke verbruikerschakelaar aan slechts een verbruiker.');
+  for (const [consumerId, switchId] of switches) {
+    if (!mappings.knownConsumers.includes(consumerId) || entities.find(entity => entity.id === switchId)?.domain !== 'switch') throw new Error('Een verbruikerschakelaar vereist een geselecteerde verbruiker en een bestaande switch-entiteit.');
   }
   return mappings;
 }
