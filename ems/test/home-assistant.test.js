@@ -62,3 +62,30 @@ test('externe verbinding lekt geen token of attributen in antwoord', async () =>
 test('API-fout blijft fout en valt niet stil terug op demodata', async () => {
   await assert.rejects(readEntities({ SUPERVISOR_TOKEN: 'test-only' }, async () => ({ ok: false, status: 401 })), /401/);
 });
+
+test('gasmeter vereist kubieke meters en een cumulatieve meterstand', () => {
+  const gasRole = roles.find(role => role.id === 'gasConsumption');
+  const entities = normalizeStates([
+    state('sensor.gas_total', 'm³', '1250', { state_class: 'total_increasing' }),
+    state('sensor.gas_flow', 'm³', '0.02', { state_class: 'measurement' })
+  ]);
+  assert.equal(validateMappings({ ...emptyMappings, gasConsumption: 'sensor.gas_total' }, entities).gasConsumption, 'sensor.gas_total');
+  assert.equal(compatible(gasRole, entities[0]), true);
+  assert.throws(() => validateMappings({ ...emptyMappings, gasConsumption: 'sensor.gas_flow' }, entities), /cumulatieve meterstand/);
+});
+
+test('fase-entiteiten vereisen de juiste ampere- en voltage-eenheden', () => {
+  const entities = normalizeStates([
+    state('sensor.l1_current', 'A', '5'), state('sensor.l1_voltage', 'V', '230'),
+    state('sensor.l2_current', 'W', '500')
+  ]);
+  const mapped = validateMappings({ ...emptyMappings, phase1Current: 'sensor.l1_current', phase1Voltage: 'sensor.l1_voltage' }, entities);
+  assert.equal(mapped.phase1Current, 'sensor.l1_current');
+  assert.throws(() => validateMappings({ ...emptyMappings, phase2Current: 'sensor.l2_current' }, entities));
+});
+
+test('accuhealth accepteert een optionele sensor in procenten', () => {
+  const health = normalizeStates([state('sensor.battery_health', '%', '96', { device_class: 'battery' })])[0];
+  assert.equal(compatible(roles.find(role => role.id === 'batteryHealth'), health), true);
+  assert.equal(compatible(roles.find(role => role.id === 'batteryHealth'), normalizeStates([state('sensor.battery_health', 'W', '96')])[0]), false);
+});

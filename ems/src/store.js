@@ -14,6 +14,7 @@ export const heatingProfiles = [
 export const preferencesSchema = z.object({
   presenceEntities: z.array(z.string().regex(/^(person|device_tracker|binary_sensor)\.[a-z0-9_]+$/)).max(20).default([]).refine(ids => new Set(ids).size === ids.length, { message: 'Selecteer elke persoon of aanwezigheidssensor maar een keer.' }),
   presenceMode: z.enum(['any', 'all']).default('any'),
+  showGas: z.boolean().default(false), showWater: z.boolean().default(false),
   heatingProfile: z.enum(heatingProfiles.map(profile => profile.id)).default('unspecified'),
   comfortC: z.number().min(16).max(24), awayC: z.number().min(12).max(24),
   occupiedFrom: z.number().int().min(0).max(23), occupiedUntil: z.number().int().min(1).max(24),
@@ -23,7 +24,7 @@ export const preferencesSchema = z.object({
   .refine(value => value.occupiedFrom < value.occupiedUntil, { message: 'Aanwezig vanaf moet eerder zijn dan aanwezig tot.' });
 
 export const defaultPreferences = {
-  presenceEntities: [], presenceMode: 'any',
+  presenceEntities: [], presenceMode: 'any', showGas: false, showWater: false,
   heatingProfile: 'unspecified',
   comfortC: 20, awayC: 17, occupiedFrom: 7, occupiedUntil: 23,
   gridLimitKw: 8, evEnergyKwh: 18, deadlineHours: 14, preferSolar: true

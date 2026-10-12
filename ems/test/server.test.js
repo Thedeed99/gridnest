@@ -100,7 +100,8 @@ test('API bewaart netsensorrichting en verbruikers, en toont berekende balans', 
   const { url } = await fixture(context);
   const mappings = { ...emptyMappings, gridMode: 'signed', gridPower: 'sensor.demo_grid_power',
     solar: 'sensor.demo_solar', batteryMode: 'measured', batteryPower: 'sensor.demo_battery_power',
-    knownConsumers: ['sensor.demo_ev_power', 'sensor.demo_heating_power', 'sensor.demo_fridge_power'] };
+    knownConsumers: ['sensor.demo_ev_power', 'sensor.demo_heating_power', 'sensor.demo_fridge_power'],
+    knownConsumerNames: { 'sensor.demo_ev_power': 'Elektrische auto' } };
   const saved = await fetch(`${url}/api/mappings`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(mappings) });
   assert.equal(saved.status, 200);
   const body = await (await fetch(`${url}/api/bootstrap`)).json();
@@ -108,7 +109,42 @@ test('API bewaart netsensorrichting en verbruikers, en toont berekende balans', 
   assert.ok(Math.abs(body.energy.totalKw - 2.97) < 0.000001);
   assert.ok(Math.abs(body.energy.knownKw - 2.2) < 0.000001);
   assert.ok(Math.abs(body.energy.unknownKw - 0.77) < 0.000001);
+  assert.equal(body.energy.consumers.find(item => item.id === 'sensor.demo_ev_power').name, 'Elektrische auto');
   assert.equal(body.energy.totalSource, 'balance');
+});
+
+test('metergeschiedenis-API gebruikt alleen de ingestelde meter', async context => {
+  let requestedEntity;
+  let requestedUtility;
+  const { url, store } = await fixture(context, { utilityHistoryProvider: async (entityId, utility) => {
+    requestedEntity = entityId;
+    requestedUtility = utility;
+    return { available: true, series: { hours24: [], days7: [], days30: [] } };
+  } });
+  const mappings = { ...emptyMappings, gasConsumption: 'sensor.demo_gas', waterConsumption: 'sensor.demo_water' };
+  const saved = await fetch(`${url}/api/mappings`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(mappings) });
+  assert.equal(saved.status, 200);
+  assert.equal((await fetch(`${url}/api/utility-history/water`)).status, 403);
+  await store.update({ preferences: { ...defaultPreferences, showWater: true } });
+  const response = await fetch(`${url}/api/utility-history/water`);
+  assert.equal(response.status, 200);
+  assert.equal(requestedEntity, 'sensor.demo_water');
+  assert.equal(requestedUtility, 'water');
+  assert.equal((await response.json()).available, true);
+  await store.update({ preferences: { ...defaultPreferences, showWater: false } });
+  assert.equal((await fetch(`${url}/api/utility-history/water`)).status, 403);
+});
+
+test('dagrecap-API retourneert de meters voor het overzicht', async context => {
+  const { url, store } = await fixture(context, { dailyRecapProvider: async mappings => ({
+    available: true, complete: true, rows: [{ label: mappings.knownConsumerNames['sensor.demo_ev_power'], energyKwh: 4.2 }]
+  }) });
+  await store.update({ mappings: { ...emptyMappings, knownConsumers: ['sensor.demo_ev_power'], knownConsumerNames: { 'sensor.demo_ev_power': 'Elektrische auto' } } });
+  const response = await fetch(`${url}/api/daily-recap`);
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  assert.equal(result.rows[0].label, 'Elektrische auto');
+  assert.equal(result.rows[0].energyKwh, 4.2);
 });
 
 test('API bewaart verwarmingsprofiel en levert advies zonder schakelcommando', async context => {

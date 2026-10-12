@@ -4,10 +4,21 @@ export const roles = [
   { id: 'gridImport', name: 'Netafname', domain: 'sensor', units: ['W', 'kW'], icon: 'plug', description: 'Actueel vermogen uit het net; niet een cumulatieve kWh-meter.' },
   { id: 'gridExport', name: 'Teruglevering', domain: 'sensor', units: ['W', 'kW'], icon: 'arrow-up-right', description: 'Actueel teruggeleverd vermogen, als positieve waarde.' },
   { id: 'solar', name: 'Zonnepanelen', domain: 'sensor', units: ['W', 'kW'], icon: 'sun', description: 'Actuele productie van de omvormer.' },
+  { id: 'solarExpectedNow', name: 'Zonneverwachting nu', domain: 'sensor', units: ['W', 'kW'], icon: 'sun', description: 'Verwacht zonnevermogen op dit moment uit je forecast-integratie.' },
+  { id: 'solarExpectedToday', name: 'Zonneverwachting vandaag', domain: 'sensor', units: ['kWh'], icon: 'sun', description: 'Verwachte zonneopbrengst voor vandaag uit je forecast-integratie.' },
   { id: 'temperature', name: 'Kamertemperatuur', domain: 'sensor', units: ['°C'], icon: 'thermometer', description: 'De temperatuur in de belangrijkste verblijfsruimte.' },
   { id: 'climate', name: 'Verwarming', domain: 'climate', units: [], icon: 'heater', description: 'Thermostaat of warmtepomp. In deze versie alleen uitlezen.' },
   { id: 'evPower', name: 'Laadpaal', domain: 'sensor', units: ['W', 'kW'], icon: 'car', description: 'Actueel laadvermogen; geen start- of stopopdracht.' },
   { id: 'batterySoc', name: 'Thuisbatterij', domain: 'sensor', units: ['%'], icon: 'battery-charging', description: 'Laadtoestand van de batterij.' },
+  { id: 'batteryHealth', name: 'Accuhealth', domain: 'sensor', units: ['%'], icon: 'activity', description: 'Gemeten gezondheid van de accu, als de integratie deze aanbiedt.' },
+  { id: 'phase1Current', name: 'Stroomsterkte L1', domain: 'sensor', units: ['A'], icon: 'activity', description: 'Actuele stroomsterkte op fase L1.' },
+  { id: 'phase1Voltage', name: 'Spanning L1', domain: 'sensor', units: ['V'], icon: 'activity', description: 'Actuele spanning op fase L1.' },
+  { id: 'phase2Current', name: 'Stroomsterkte L2', domain: 'sensor', units: ['A'], icon: 'activity', description: 'Actuele stroomsterkte op fase L2.' },
+  { id: 'phase2Voltage', name: 'Spanning L2', domain: 'sensor', units: ['V'], icon: 'activity', description: 'Actuele spanning op fase L2.' },
+  { id: 'phase3Current', name: 'Stroomsterkte L3', domain: 'sensor', units: ['A'], icon: 'activity', description: 'Actuele stroomsterkte op fase L3.' },
+  { id: 'phase3Voltage', name: 'Spanning L3', domain: 'sensor', units: ['V'], icon: 'activity', description: 'Actuele spanning op fase L3.' },
+  { id: 'gasConsumption', name: 'Gasverbruik', domain: 'sensor', units: ['m³', 'm3'], icon: 'flame', description: 'Cumulatieve gasmeterstand in kubieke meters.' },
+  { id: 'waterConsumption', name: 'Waterverbruik', domain: 'sensor', units: ['m³', 'm3'], icon: 'droplet', description: 'Cumulatieve watermeterstand in kubieke meters.' },
   { id: 'gridPower', name: 'Netvermogen (positief / negatief)', domain: 'sensor', units: ['W', 'kW'], icon: 'plug', description: 'Een getekende netsensor voor afname en teruglevering; stel de tekenrichting in.' },
   { id: 'totalConsumption', name: 'Totaal woningverbruik', domain: 'sensor', units: ['W', 'kW'], icon: 'house-plug', description: 'Actueel totaal elektrisch woningverbruik inclusief eigen zonnestroom; netafname alleen is geen woningverbruik.' },
   { id: 'knownConsumption', name: 'Bekend verbruik (totaalsensor)', domain: 'sensor', units: ['W', 'kW'], icon: 'activity', description: 'Een bestaande som van bekende apparaten, als alternatief voor losse apparaatmetingen.' },
@@ -27,6 +38,7 @@ export function normalizeStates(states) {
     domain: state.entity_id.split('.')[0], state: state.state,
     unit: typeof state.attributes.unit_of_measurement === 'string' ? state.attributes.unit_of_measurement : '',
     deviceClass: typeof state.attributes.device_class === 'string' ? state.attributes.device_class : '',
+    stateClass: typeof state.attributes.state_class === 'string' ? state.attributes.state_class : '',
     updatedAt: state.last_updated,
     reportedAt: state.last_reported ?? state.last_updated, changedAt: state.last_changed ?? state.last_updated,
     minimum: typeof state.attributes.min === 'number' ? state.attributes.min : null,
@@ -56,7 +68,8 @@ export const mappingsSchema = z.object({
   batteryMode: z.enum(['unknown', 'none', 'measured']).default('unknown'),
   batteryDirection: z.enum(['positive-charge', 'positive-discharge']).default('positive-charge'),
   knownSource: z.enum(['individual', 'aggregate']).default('individual'),
-  knownConsumers: z.array(entityIdSchema).max(50).default([]).refine(ids => new Set(ids).size === ids.length, { message: 'Een verbruiker mag maar een keer worden geselecteerd.' })
+  knownConsumers: z.array(entityIdSchema).max(50).default([]).refine(ids => new Set(ids).size === ids.length, { message: 'Een verbruiker mag maar een keer worden geselecteerd.' }),
+  knownConsumerNames: z.record(entityIdSchema, z.string().trim().max(80)).default({})
 }).strict();
 export const emptyMappings = mappingsSchema.parse({});
 
@@ -67,6 +80,7 @@ export function validateMappings(input, entities) {
     if (!id) continue;
     const entity = entities.find(item => item.id === id);
     if (!entity || !compatible(role, entity)) throw new Error(`Geen passende entiteit voor ${role.name}.`);
+    if (['gasConsumption', 'waterConsumption'].includes(role.id) && !['total', 'total_increasing'].includes(entity.stateClass)) throw new Error(`${role.name} vereist een cumulatieve meterstand.`);
   }
   if (mappings.gridImport && mappings.gridImport === mappings.gridExport) throw new Error('Netafname en teruglevering moeten afzonderlijke sensoren zijn.');
   if (mappings.totalConsumption && mappings.totalConsumption === mappings.knownConsumption) throw new Error('Woningverbruik en bekend verbruik moeten afzonderlijke metingen zijn.');
