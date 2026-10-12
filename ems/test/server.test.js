@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createApp } from '../src/server.js';
 import { createStore, defaultPreferences, thermalSchema } from '../src/store.js';
 import { emptyMappings } from '../src/home-assistant.js';
@@ -16,6 +18,25 @@ const thermalConfig = () => ({
     { id: 'airco', name: 'Airco', entityId: 'climate.demo_airco', profile: 'airco' }
   ],
   rooms: [{ id: 'living', name: 'Woonkamer', floor: 'Begane grond', temperatureEntity: 'sensor.demo_temperature', presenceEntity: 'binary_sensor.demo_presence', targetC: 21, sourceIds: ['cv', 'airco'] }]
+});
+
+test('startup logs the underlying initialization error', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'gridnest-startup-test-'));
+  const dataPath = join(directory, 'data');
+  await mkdir(dataPath);
+  await writeFile(join(dataPath, 'settings.json'), '{');
+  try {
+    const result = spawnSync(process.execPath, [fileURLToPath(new URL('../src/server.js', import.meta.url))], {
+      env: { ...process.env, DATA_DIR: dataPath, SUPERVISOR_TOKEN: '', HA_TOKEN: '', DEMO_MODE: '' },
+      encoding: 'utf8'
+    });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /Gridnest starten mislukt/);
+    assert.match(result.stderr, /Opgeslagen instellingen zijn ongeldig/);
+    assert.match(result.stderr, /SyntaxError/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 async function fixture(context, options = {}) {

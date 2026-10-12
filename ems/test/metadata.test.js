@@ -9,12 +9,15 @@ test('Gridnest metadata, pakketversie en containerlabel komen overeen', async ()
   const config = parse(await load('../config.yaml'));
   const repository = parse(await load('../../repository.yaml'));
   const pkg = JSON.parse(await load('../package.json'));
+  const lock = JSON.parse(await load('../package-lock.json'));
   const dockerfile = await load('../Dockerfile');
   assert.equal(repository.name, 'Gridnest');
   assert.equal(config.name, 'Gridnest');
   assert.equal(config.slug, 'gridnest');
   assert.equal(pkg.name, 'gridnest');
   assert.equal(config.version, pkg.version);
+  assert.equal(lock.version, pkg.version);
+  assert.equal(lock.packages[''].version, pkg.version);
   assert.ok(dockerfile.includes(`ARG BUILD_VERSION=${config.version}`));
   assert.deepEqual(config.arch, ['amd64', 'aarch64']);
 });

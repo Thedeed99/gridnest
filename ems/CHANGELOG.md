@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1 - 2026-10-12
+
+- Toon de oorspronkelijke fout en stacktrace wanneer de app niet kan starten.
+
 ## 0.1.0 - Nog niet uitgebracht
 
 - Compact live warmteoverzicht op het algemene dashboard, met gedeelde kamerweergave en doorklik naar Warmte.

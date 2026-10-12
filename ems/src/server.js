@@ -134,7 +134,7 @@ export async function startServer(env = process.env) {
   if (supervisor) {
     let options = {};
     try { options = JSON.parse(await readFile('/data/options.json', 'utf8')); }
-    catch (error) { if (error.code !== 'ENOENT') throw new Error('Ongeldige appconfiguratie.'); }
+    catch (error) { if (error.code !== 'ENOENT') throw new Error('Ongeldige appconfiguratie.', { cause: error }); }
     controlEnv = { ...env, CONTROL_ENABLED: env.CONTROL_ENABLED === 'true' || options.allow_control === true ? 'true' : 'false' };
   }
   const store = await createStore(env.DATA_DIR || fileURLToPath(new URL('../data/', import.meta.url)), demo ? 'demo' : 'home-assistant');
@@ -156,5 +156,5 @@ export async function startServer(env = process.env) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  startServer().catch(() => { console.error('Starten mislukt. Controleer instellingen, opslag en poort 8080.'); process.exitCode = 1; });
+  startServer().catch(error => { console.error('Gridnest starten mislukt:', error); process.exitCode = 1; });
 }
