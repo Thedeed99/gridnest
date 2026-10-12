@@ -129,7 +129,19 @@ test('bekende verbruikers kunnen alleen aan bestaande unieke schakelentiteiten w
   assert.throws(() => validateMappings({ ...mappings, knownConsumers: ['sensor.fridge', 'sensor.dryer'], knownConsumerSwitches: { 'sensor.fridge': 'switch.fridge', 'sensor.dryer': 'switch.fridge' } }, entities));
 });
 
+test('auto-accupercentage vereist een sensor in procenten', () => {
+  const entities = normalizeStates([state('sensor.car_soc', '%', '64'), state('sensor.car_power', 'W', '640')]);
+  assert.equal(validateMappings({ ...emptyMappings, evSoc: 'sensor.car_soc' }, entities).evSoc, 'sensor.car_soc');
+  assert.throws(() => validateMappings({ ...emptyMappings, evSoc: 'sensor.car_power' }, entities));
+});
+
 test('demo sensor identifiers blijven uniek', () => {
   const ids = demoEntities().map(entity => entity.id);
   assert.equal(new Set(ids).size, ids.length);
+});
+
+test('laadpaaldagtotaal vereist een cumulatieve energieteller en geen vermogens- of sessiemeter', () => {
+  const entities = normalizeStates([state('sensor.ev_total', 'kWh', '42', { state_class: 'total_increasing' }), state('sensor.ev_session', 'kWh', '2.3', { state_class: 'measurement' })]);
+  assert.equal(validateMappings({ ...emptyMappings, evEnergyTotal: 'sensor.ev_total' }, entities).evEnergyTotal, 'sensor.ev_total');
+  assert.throws(() => validateMappings({ ...emptyMappings, evEnergyTotal: 'sensor.ev_session' }, entities), /cumulatieve/);
 });

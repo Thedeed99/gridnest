@@ -10,6 +10,8 @@ export const roles = [
   { id: 'temperature', name: 'Kamertemperatuur', domain: 'sensor', units: ['°C'], icon: 'thermometer', description: 'De temperatuur in de belangrijkste verblijfsruimte.' },
   { id: 'climate', name: 'Verwarming', domain: 'climate', units: [], icon: 'heater', description: 'Thermostaat of warmtepomp. In deze versie alleen uitlezen.' },
   { id: 'evPower', name: 'Laadpaal', domain: 'sensor', units: ['W', 'kW'], icon: 'car', description: 'Actueel laadvermogen; geen start- of stopopdracht.' },
+  { id: 'evSoc', name: 'Auto · Accupercentage', domain: 'sensor', units: ['%'], icon: 'battery-charging', description: 'Laadtoestand van de auto uit de auto-integratie; geen percentage van de thuisbatterij.' },
+  { id: 'evEnergyTotal', name: 'Laadpaal · Energiemeter', domain: 'sensor', units: ['Wh', 'kWh'], icon: 'activity', description: 'Cumulatieve laadenergie met Home Assistant-statistieken voor het dagtotaal; geen sessiemeter.' },
   { id: 'evEnable', name: 'Laadpaal · Laden toestaan', domain: 'switch', units: [], icon: 'car', description: 'Schakelaar om laden te starten of te stoppen.' },
   { id: 'evCurrentLimit', name: 'Laadpaal · Stroomlimiet', domain: 'number', units: ['A'], icon: 'activity', description: 'Instelbare laadstroomlimiet in ampere.' },
   { id: 'evCableStatus', name: 'Laadpaal · Kabelstatus', domain: 'binary_sensor', units: [], icon: 'plug', description: 'Status van de laadkabel.' },
@@ -98,7 +100,7 @@ export function validateMappings(input, entities) {
     if (!id) continue;
     const entity = entities.find(item => item.id === id);
     if (!entity || !compatible(role, entity)) throw new Error(`Geen passende entiteit voor ${role.name}.`);
-    if (['gasConsumption', 'waterConsumption'].includes(role.id) && !['total', 'total_increasing'].includes(entity.stateClass)) throw new Error(`${role.name} vereist een cumulatieve meterstand.`);
+    if (['gasConsumption', 'waterConsumption', 'evEnergyTotal'].includes(role.id) && !['total', 'total_increasing'].includes(entity.stateClass)) throw new Error(`${role.name} vereist een cumulatieve meterstand.`);
   }
   if (mappings.gridImport && mappings.gridImport === mappings.gridExport) throw new Error('Netafname en teruglevering moeten afzonderlijke sensoren zijn.');
   if (mappings.totalConsumption && mappings.totalConsumption === mappings.knownConsumption) throw new Error('Woningverbruik en bekend verbruik moeten afzonderlijke metingen zijn.');

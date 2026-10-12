@@ -22,6 +22,8 @@ export function demoEntities() {
     sensor('sensor.demo_solar', 'Omvormer · Zonnevermogen', 2150, 'W', 'power'),
     sensor('sensor.demo_temperature', 'Woonkamer · Temperatuur', 20.2, '°C', 'temperature'),
     sensor('sensor.demo_ev_power', 'Laadpaal · Vermogen', 1200, 'W', 'power'),
+    sensor('sensor.demo_ev_soc', 'Auto · Accupercentage', 64, '%', 'battery'),
+    { ...sensor('sensor.demo_ev_energy_total', 'Laadpaal · Totale laadenergie', 1420, 'kWh', 'energy'), attributes: { friendly_name: 'Laadpaal · Totale laadenergie', unit_of_measurement: 'kWh', device_class: 'energy', state_class: 'total_increasing' } },
     sensor('sensor.demo_ev_session', 'Laadpaal · Sessieverbruik', 8400, 'Wh', 'energy'),
     sensor('sensor.demo_ev_l1_current', 'Laadpaal · L1', 16, 'A', 'current'),
     sensor('sensor.demo_ev_l2_current', 'Laadpaal · L2', 0, 'A', 'current'),

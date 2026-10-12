@@ -118,3 +118,16 @@ test('zonne-uurwaarden tellen op tot dagopbrengst en verzinnen geen ontbrekende 
   assert.equal(row.hours[3].energyKwh, null);
   assert.equal(row.hours.reduce((total, bucket) => total + (bucket.energyKwh ?? 0), 0), row.energyKwh);
 });
+
+test('officiele Energie-totalen gaan voor en behouden opt-in voor gas en water', () => {
+  const recap = { rows: [{ label: 'Woningverbruik', entityId: 'sensor.total', energyKwh: 11.43, complete: true }],
+    officialRows: [{ label: 'Woningverbruik', value: 10.76, unit: 'kWh', source: 'home-assistant', complete: true },
+      { label: 'Teruglevering', value: 0.05, unit: 'kWh', source: 'home-assistant', complete: true },
+      { label: 'Gas', value: 1.49, unit: 'm³', source: 'home-assistant', complete: true }] };
+  const mappings = { ...emptyMappings, totalConsumption: 'sensor.total' };
+  const result = dailyOverviewRows(recap, mappings, { gas: { value: 1.5, complete: false } });
+  assert.equal(result[0].value, 10.76);
+  assert.equal(result[0].source, 'home-assistant');
+  assert.equal(result.at(-1).value, 1.49);
+  assert.ok(!dailyOverviewRows(recap, mappings).some(row => row.label === 'Gas'));
+});

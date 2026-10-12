@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.7 - 2026-10-12
+
+- Sta bevestigde handmatige verbruikers- en laadpaalbediening toe in Proefmodus, met behoud van apparaatvrijgave en veiligheidscontroles.
+- Lees schakelstatus opnieuw uit voor handmatige bediening; wijs een onveranderde beschikbare schakelaar niet af op basis van de laatste wijzigingstijd.
+- Controleer de accuterugmelding na een opdracht en meld wanneer de gewenste stand nog niet bevestigd is.
+- Gebruik de Home Assistant Energie-configuratie en recorderstatistieken voor de dagrecap, met juiste tijdzone en expliciet gelabelde schattingen als alternatief.
+- Voeg auto-accupercentage en een cumulatieve laadpaal-energiemeter als optionele koppelingen toe.
+- Verwijder de Vandaag-secties van Laadpaal en Accu; behoud de centrale dagrecap.
+
 ## 0.1.6 - 2026-10-12
 
 - Centreer ampere en voltage samen onder het fasevermogen.

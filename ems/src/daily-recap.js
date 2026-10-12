@@ -35,9 +35,20 @@ export function recapMeters(mappings, entities) {
 }
 
 export function dailyOverviewRows(recap, mappings, utilities = {}) {
+  if (Array.isArray(recap.officialRows)) {
+    const estimated = dailyOverviewRows({ ...recap, officialRows: undefined }, mappings, utilities);
+    const official = new Map(recap.officialRows.map(row => [row.label, row]));
+    const combined = new Map(estimated.map(row => [row.label, row]));
+    for (const [label, row] of official) {
+      if (label === 'Gas' && !utilities.gas || label === 'Water' && !utilities.water) continue;
+      combined.set(label, row);
+    }
+    return ['Woningverbruik', 'Teruglevering', 'Laadpaal', 'Batterij laden', 'Batterij ontladen', 'Gas', 'Water']
+      .filter(label => combined.has(label)).map(label => combined.get(label));
+  }
   const rows = [];
   const find = (role, label) => recap.rows.find(row => row.entityId === mappings[role] && row.label === label);
-  const add = (label, row, unit = 'kWh') => rows.push({ label, value: row?.energyKwh ?? row?.value ?? null, complete: Boolean(row?.complete), unit });
+  const add = (label, row, unit = 'kWh') => rows.push({ label, value: row?.energyKwh ?? row?.value ?? null, complete: Boolean(row?.complete), unit, source: row?.source ?? 'estimate' });
   if (mappings.totalConsumption) add('Woningverbruik', find('totalConsumption', 'Woningverbruik'));
   else if (mappings.solar && (mappings.gridMode === 'signed' ? mappings.gridPower : mappings.gridImport && mappings.gridExport) && ['none', 'measured'].includes(mappings.batteryMode)) {
     const imported = find(mappings.gridMode === 'signed' ? 'gridPower' : 'gridImport', 'Netafname');

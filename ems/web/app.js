@@ -86,7 +86,7 @@ async function api(path, options = {}) {
 function syncDeviceNavigation() {
   const rules = data.control?.rules ?? [];
   const visibility = {
-      ev: Boolean(['evPower', 'evEnable', 'evCurrentLimit', 'evCableStatus', 'evLockStatus', 'evSessionEnergy', 'evPhase1Current', 'evPhase2Current', 'evPhase3Current'].some(role => data.mappings[role]) || rules.some(rule => ['ev_enable', 'ev_current'].includes(rule.action.type))),
+      ev: Boolean(['evPower', 'evSoc', 'evEnergyTotal', 'evEnable', 'evCurrentLimit', 'evCableStatus', 'evLockStatus', 'evSessionEnergy', 'evPhase1Current', 'evPhase2Current', 'evPhase3Current'].some(role => data.mappings[role]) || rules.some(rule => ['ev_enable', 'ev_current'].includes(rule.action.type))),
       battery: data.mappings.batteryMode === 'measured' || Boolean(data.mappings.batterySoc || data.mappings.batteryHealth || data.mappings.batteryEnable || data.mappings.batteryInputPower || data.mappings.batteryOutputPower || data.mappings.batteryRemainingTime) || rules.some(rule => rule.action.type === 'battery_power'),
       solar: Boolean(data.mappings.solar || data.mappings.solarToday || data.mappings.solarExpectedNow || data.mappings.solarExpectedToday || data.mappings.solarLimit || rules.some(rule => rule.action.type === 'pv_limit'))
   };
@@ -320,7 +320,7 @@ function consumptionSplit() {
           toggle.setAttribute('role', 'switch');
           toggle.setAttribute('aria-checked', String(enabled));
         }
-        toggle.disabled = !knownState || !data.controlStatus?.activeAllowed || data.control?.mode !== 'active';
+        toggle.disabled = !knownState || !data.controlStatus?.activeAllowed;
         row.append(toggle);
       }
       list.append(row);
@@ -350,7 +350,10 @@ async function loadDailyRecap(container, reload = false, filter = null) {
     const utilities = {};
     if (!filter) {
       await Promise.all([['gas', 'showGas', 'gasConsumption'], ['water', 'showWater', 'waterConsumption']].map(async ([utility, preference, role]) => {
-        if (!data.preferences[preference] || !data.mappings[role]) return;
+        if (!data.preferences[preference]) return;
+        const official = recap.officialRows?.find(row => row.label === (utility === 'gas' ? 'Gas' : 'Water'));
+        if (official) { utilities[utility] = official; return; }
+        if (!data.mappings[role]) return;
         try { utilities[utility] = (await utilityHistoryData(utility, data.mappings[role], reload)).today ?? { value: null, complete: false }; }
         catch { utilities[utility] = { value: null, complete: false }; }
       }));
@@ -373,11 +376,12 @@ async function loadDailyRecap(container, reload = false, filter = null) {
     for (const row of rows) {
       const item = element('li', 'daily-recap-row');
       const value = row.value === null || row.value === undefined ? 'Niet beschikbaar'
-        : `${new Intl.NumberFormat('nl-NL', { maximumFractionDigits: row.unit === 'm³' ? 3 : 2 }).format(row.value)} ${row.unit}${row.complete ? '' : ' (schatting)'}`;
+        : `${new Intl.NumberFormat('nl-NL', { maximumFractionDigits: row.unit === 'm³' ? 3 : 2 }).format(row.value)} ${row.unit}${row.source === 'home-assistant' ? '' : ' (schatting)'}`;
       item.append(element('span', '', row.label), element('strong', '', value));
       list.append(item);
     }
     container.append(list);
+    if (!filter && recap.source === 'home-assistant' && recap.updatedThrough) container.append(element('p', 'muted', `Energie bijgewerkt t/m ${formatTime(recap.updatedThrough)}`));
   } catch (error) {
     const solarActual = document.querySelector('#solar-actual-today');
     if (solarActual) solarActual.textContent = solarDayText();
@@ -1627,7 +1631,7 @@ function devicePanel(kind) {
     panel.append(tiles);
     if (data.mappings.batteryPower) panel.append(element('p', 'appliance-footer', `Batterijvermogen · ${measurement('batteryPower')}`));
   } else {
-    const allowed = data.controlStatus?.activeAllowed && data.control?.mode === 'active';
+    const allowed = data.controlStatus?.activeAllowed;
     const enabled = data.readings.find(item => item.role === 'evEnable');
     const lock = data.readings.find(item => item.role === 'evLockStatus');
     const confirmCommand = (title, command, reset = () => {}) => {
@@ -1688,6 +1692,7 @@ function devicePanel(kind) {
     limitLabel.append(slider);
     panel.append(limitLabel);
     tiles.append(metric('Vermogen', measurement('evPower')), metric('Sessie', measurement('evSessionEnergy')));
+    if (data.mappings.evSoc) tiles.append(metric('Auto-accu', measurement('evSoc')));
     panel.append(tiles, element('h3', 'charger-phase-heading', 'Laadstroom per fase'));
     const phases = element('div', 'charger-phases');
     for (const phase of [1, 2, 3]) {
@@ -1707,7 +1712,7 @@ function devicePanel(kind) {
     const footer = element('p', 'appliance-footer', measurement('evLockStatus'));
     footer.prepend(icon('lock'));
     panel.append(footer);
-    if (!allowed) panel.append(element('p', 'appliance-control-note', 'Bediening vereist apparaatvrijgave en de stand Actief.'));
+    if (!allowed) panel.append(element('p', 'appliance-control-note', 'Handmatige bediening vereist vrijgave voor echte apparaatsturing.'));
     if (!data.mappings.evEnable || !data.mappings.evCurrentLimit) {
       const connect = element('button', 'secondary-button', 'Laadpaalbediening koppelen');
       connect.prepend(icon('link'));
@@ -1913,14 +1918,6 @@ function deviceDetail(kind) {
     loadSolarChart(solarPanel);
     return;
   }
-  const recap = element('section', 'daily-recap-section');
-  const content = element('div', 'daily-recap-content');
-  const reload = toolButton('refresh-cw', `${config.title}dagrecap vernieuwen`, () => loadDailyRecap(content, true, config.filter));
-  recap.append(element('div', 'section-heading', undefined), content);
-  recap.firstChild.append(element('h2', '', 'Vandaag'), reload);
-  content.append(element('p', 'muted', 'Dagtotalen laden…'));
-  main.append(recap);
-  loadDailyRecap(content, false, config.filter);
   const hasBatterySwitch = kind === 'battery' && data.mappings.batteryEnable;
   const hasRelatedRule = (kind === 'ev' && data.control.rules.some(rule => ['ev_enable', 'ev_current'].includes(rule.action.type))) ||
     (kind === 'battery' && data.control.rules.some(rule => rule.action.type === 'battery_power')) ||
@@ -1942,12 +1939,13 @@ function batteryControlPanel(parent = main) {
     return;
   }
   const reading = data.readings.find(item => item.role === 'batteryEnable');
-  const enabled = reading?.valid && reading.value === 'on';
+  const stateKnown = reading?.valid && ['on', 'off'].includes(reading.value);
+  const enabled = stateKnown && reading.value === 'on';
   const section = element('section', 'battery-control-section');
-  const status = element('span', 'room-status', reading?.valid ? enabled ? 'Actief' : 'Stand-by' : 'Status onbekend');
+  const status = element('span', 'room-status', stateKnown ? enabled ? 'Actief' : 'Stand-by' : 'Status onbekend');
   const toggle = element('button', 'primary-button', enabled ? 'Accu uitschakelen' : 'Accu activeren');
   toggle.prepend(icon(enabled ? 'pause' : 'play'));
-  toggle.disabled = !data.controlStatus?.activeAllowed || !reading?.valid;
+  toggle.disabled = !data.controlStatus?.activeAllowed || !stateKnown;
   toggle.addEventListener('click', () => {
     const dialog = element('dialog', 'thermal-dialog');
     const targetEnabled = !enabled;
@@ -1960,9 +1958,9 @@ function batteryControlPanel(parent = main) {
     confirm.addEventListener('click', async () => {
       confirm.disabled = true;
       try {
-        await api('battery/enable', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: targetEnabled, confirm: true }) });
+        const result = await api('battery/enable', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: targetEnabled, confirm: true }) });
         dialog.close();
-        notify('Accuschakelaar aangestuurd.');
+        notify(result.verified ? `Accuschakelaar ${targetEnabled ? 'ingeschakeld' : 'uitgeschakeld'}; status bevestigd.` : 'Accuopdracht verstuurd; de gewenste stand is nog niet teruggekoppeld.', !result.verified);
         await refresh();
       } catch (error) { notify(error.message, true); confirm.disabled = false; }
     });
