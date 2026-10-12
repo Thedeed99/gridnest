@@ -69,7 +69,7 @@ jobs:
         run: docker run -d --name gridnest-smoke-supervisor --platform ${{ matrix.platform }} -e SUPERVISOR_TOKEN=smoke-token --mount type=bind,source="$RUNNER_TEMP/gridnest-smoke/options.json",target=/data/options.json,readonly gridnest-smoke:local
       - name: Check root-only options and non-root server
         run: |
-          docker exec gridnest-smoke-supervisor node -e "fetch('http://127.0.0.1:8080/health').then(response => { if (response.status !== 403) process.exit(1); }).catch(() => process.exit(1))"
+          docker exec gridnest-smoke-supervisor node -e "(async () => { for (let attempt = 0; attempt < 15; attempt++) { try { const response = await fetch('http://127.0.0.1:8080/health'); if (response.status !== 403) process.exit(1); process.exit(0); } catch {} await new Promise(resolve => setTimeout(resolve, 1000)); } process.exit(1); })()"
           docker exec gridnest-smoke-supervisor sh -c "grep -Eq '^Uid:[[:space:]]+1000' /proc/1/status"
           timeout 10s sh -c 'docker logs --follow gridnest-smoke-supervisor 2>&1 | grep -m 1 -F "sturing toegestaan"'
       - name: Container logs and cleanup
