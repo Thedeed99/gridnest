@@ -20,6 +20,7 @@ export function recapMeters(mappings, entities) {
   add(mappings.solar, 'Zonnepanelen', 'production');
   add(mappings.totalConsumption, 'Woningverbruik', 'consumption');
   add(mappings.evPower, 'Laadpaal', 'consumption');
+  for (const phase of [1, 2, 3]) add(mappings[`phase${phase}Power`], `Fase L${phase}`, 'consumption');
   if (mappings.gridMode === 'signed') add(mappings.gridPower, 'Netvermogen', 'grid', true, mappings.gridDirection === 'positive-export' ? -1 : 1);
   if (mappings.batteryMode === 'measured') add(mappings.batteryPower, 'Batterijvermogen', 'battery', true, mappings.batteryDirection === 'positive-discharge' ? -1 : 1);
   if (mappings.knownSource === 'aggregate') add(mappings.knownConsumption, 'Bekende verbruikers', 'consumption');

@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.1.5 - 2026-10-12
+
+- Werk kamer-aanwezigheid ook met person- en device_tracker-entiteiten; ververs zichtbare waarden elke 10 seconden.
+- Voeg laadkabel-, slot-, sessie-kWh- en fasestroomkoppelingen toe aan Laadpaal.
+- Voeg een bevestigde, versheidsgecontroleerde accu-aan/uitbediening toe achter HA-vrijgave; toon input, output, resterende tijd en optionele health.
+- Voeg een beveiligde 0–100%-zonnedimmerslider toe en vergelijk forecast met werkelijke productie.
+- Toon fasekaarten als drie uitgelijnde kolommen met gemeten kW of correct gelabelde VA, plus A en V.
+- Voeg een kW/W-schakelaar met Nederlandse duizendtalsnotatie toe.
+- Toon de vrijgavestatus in plaats van Proefmodus wanneer echte apparaatsturing is toegestaan.
+- Groepeer Koppelingen per onderwerp en centreer de faselabels.
+- Geef Laadpaal en Accu de apparaatgerichte voorbeeldopmaak met centraal apparaatbeeld, hoofdknop en compacte metingen.
+- Voeg bevestigde laadpaalbediening toe voor starten/stoppen, kabelvergrendeling en een laadstroomlimiet van 6–32 A binnen het entiteitsbereik.
+- Toon Opwek vandaag naast de zonneverwachting; markeer onvolledige historie als schatting.
+- Pas de zonnelimiet toe bij loslaten van de slider, na toestemming per entiteit voor de huidige browsersessie.
+- Bewaar een instelbaar verversingsinterval van 5, 10, 30 of 60 seconden, of alleen handmatig; onderbreek geen open dialogen of sliderbediening.
+
 ## 0.1.4 - 2026-10-12
 
 - Maak warmtebronnen en Stroomregels aan in browsers zonder `crypto.randomUUID()`; de mobiele Stroom-knop opent de editor.

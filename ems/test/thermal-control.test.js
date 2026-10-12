@@ -23,6 +23,18 @@ test('Warmte zet het kamerdoel om in een thermostaatopdracht, ook zonder gebruik
   assert.deepEqual(plans[0].command, { entityId: 'climate.cv', service: 'climate.set_temperature', value: 21 });
 });
 
+test('kamerspecifieke person-aanwezigheid stuurt het kamerdoel naar comfort of afwezig', () => {
+  const input = fixture();
+  input.thermal.rooms[0].presenceEntity = 'person.resident';
+  input.thermal.rooms[0].presenceControl = true;
+  input.preferences = { awayC: 17, presenceEntities: [], presenceMode: 'any' };
+  input.entities.push({ id: 'person.resident', domain: 'person', available: true, state: 'home', reportedAt: new Date(now).toISOString() });
+  assert.doesNotThrow(() => validateThermal(input.thermal, input.entities));
+  assert.equal(planThermal(input)[0].command.value, 21);
+  input.entities.find(entity => entity.id === 'person.resident').state = 'not_home';
+  assert.equal(planThermal(input)[0].command.value, 17);
+});
+
 test('verwarmmodus volgt pas nadat het juiste temperatuurdoel wordt teruggemeld', () => {
   const input = fixture(); input.entities[1].targetTemperature = 21;
   const plans = planThermal(input);
