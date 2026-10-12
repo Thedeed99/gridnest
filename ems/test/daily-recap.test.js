@@ -1,9 +1,31 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { dailyEnergyRecap, demoDailyRecap, recapMeters, readDailyRecap } from '../src/daily-recap.js';
+import { dailyEnergyRecap, dailyOverviewRows, demoDailyRecap, recapMeters, readDailyRecap } from '../src/daily-recap.js';
 import { emptyMappings } from '../src/home-assistant.js';
 
 const sensor = (id, state, unit = 'W') => ({ id, name: id, domain: 'sensor', state: String(state), unit, available: true });
+
+test('overzichtsrecap toont alleen hoofdtotale waarden, batterijrichtingen en optionele meters', () => {
+  const mappings = { ...emptyMappings, totalConsumption: 'sensor.total', gridExport: 'sensor.export', evPower: 'sensor.ev', batteryMode: 'measured', batteryPower: 'sensor.battery' };
+  const row = (entityId, label, energyKwh) => ({ entityId, label, energyKwh, complete: true });
+  const recap = { rows: [row('sensor.total', 'Woningverbruik', 12), row('sensor.export', 'Teruglevering', 2), row('sensor.ev', 'Laadpaal', 4), row('sensor.battery', 'Batterij laden', 3), row('sensor.battery', 'Batterij ontladen', 1), row('sensor.phase', 'Fase L1', 5), row('sensor.fridge', 'Koelkast', 1)] };
+  const result = dailyOverviewRows(recap, mappings, { gas: { value: 0.5, complete: true }, water: { value: 0.2, complete: false } });
+  assert.deepEqual(result.map(row => row.label), ['Woningverbruik', 'Teruglevering', 'Laadpaal', 'Batterij laden', 'Batterij ontladen', 'Gas', 'Water']);
+  assert.equal(result.at(-1).unit, 'm³');
+  assert.equal(result.at(-1).complete, false);
+  const missing = dailyOverviewRows(recap, emptyMappings);
+  assert.deepEqual(missing.map(row => row.label), ['Woningverbruik', 'Teruglevering']);
+  assert.ok(missing.every(row => row.value === null));
+});
+
+test('recap berekent dagverbruik alleen bij volledige balansbronnen en ondersteunt losse batterijmetingen', () => {
+  const mappings = { ...emptyMappings, solar: 'sensor.solar', gridImport: 'sensor.import', gridExport: 'sensor.export', batteryMode: 'none' };
+  const recap = { rows: [['sensor.solar', 'Zonnepanelen', 5], ['sensor.import', 'Netafname', 3], ['sensor.export', 'Teruglevering', 2]].map(([entityId, label, energyKwh]) => ({ entityId, label, energyKwh, complete: true })) };
+  assert.equal(dailyOverviewRows(recap, mappings)[0].value, 6);
+  assert.equal(dailyOverviewRows({ rows: recap.rows.slice(1) }, mappings)[0].value, null);
+  const inputs = { ...emptyMappings, batteryInputPower: 'sensor.input', batteryOutputPower: 'sensor.output' };
+  assert.deepEqual(recapMeters(inputs, [sensor('sensor.input', 100), sensor('sensor.output', 50)]).map(row => row.label), ['Batterij laden', 'Batterij ontladen']);
+});
 
 test('dagrecap integreert gekoppelde vermogensmeters naar kWh', () => {
   const now = new Date(2026, 9, 12, 2);
@@ -79,4 +101,20 @@ test('dagrecap telt een sensor niet dubbel bij een rol en bekende verbruikers', 
   const mappings = { ...emptyMappings, evPower: 'sensor.ev', knownConsumers: ['sensor.ev'], knownConsumerNames: { 'sensor.ev': 'Auto laden' } };
   const meters = recapMeters(mappings, [sensor('sensor.ev', 1200)]);
   assert.deepEqual(meters.map(meter => meter.label), ['Laadpaal']);
+});
+
+test('zonne-uurwaarden tellen op tot dagopbrengst en verzinnen geen ontbrekende of toekomstige uren', () => {
+  const meter = { id: 'sensor.solar', label: 'Zonnepanelen', kind: 'production', unit: 'W' };
+  const now = new Date(2026, 9, 12, 3);
+  const history = [Array.from({ length: 7 }, (_, index) => ({ last_changed: new Date(2026, 9, 12, 1, index * 15).toISOString(), state: index < 4 ? '1000' : '0' }))];
+  const row = dailyEnergyRecap(history, [meter], now).rows[0];
+  assert.equal(row.hours.length, 24);
+  assert.equal(row.hours[0].energyKwh, null);
+  assert.equal(row.hours[0].complete, false);
+  assert.equal(row.hours[1].energyKwh, 1);
+  assert.equal(row.hours[1].complete, true);
+  assert.equal(row.hours[2].energyKwh, 0);
+  assert.equal(row.hours[2].complete, true);
+  assert.equal(row.hours[3].energyKwh, null);
+  assert.equal(row.hours.reduce((total, bucket) => total + (bucket.energyKwh ?? 0), 0), row.energyKwh);
 });

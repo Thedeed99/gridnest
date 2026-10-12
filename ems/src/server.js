@@ -17,6 +17,7 @@ export function createApp({ store, entitiesProvider, demo = false, supervisor = 
   utilityHistoryProvider = async () => ({ available: false, series: { hours24: [], days7: [], days30: [] } }),
   dailyRecapProvider = async () => ({ available: false, complete: false, rows: [] }),
   batterySwitchProvider = async () => { throw new Error('Accubediening niet beschikbaar.'); },
+  consumerSwitchProvider = async () => { throw new Error('Verbruikerbediening niet beschikbaar.'); },
   evCommandProvider = async () => { throw new Error('Laadpaalbediening niet beschikbaar.'); },
   solarLimitProvider = async () => { throw new Error('Omvormerbediening niet beschikbaar.'); } }) {
   const app = express();
@@ -73,6 +74,27 @@ export function createApp({ store, entitiesProvider, demo = false, supervisor = 
       return response.json(recap);
     } catch (error) {
       return response.status(503).json({ error: error.message || 'Dagrecap niet beschikbaar.' });
+    }
+  });
+  app.post('/api/consumers/enable', async (request, response) => {
+    const body = z.object({ consumerId: z.string().regex(/^sensor\.[a-z0-9_]+$/), switchId: z.string().regex(/^switch\.[a-z0-9_]+$/),
+      enabled: z.boolean(), expectedState: z.enum(['on', 'off']), confirm: z.literal(true) }).strict().safeParse(request.body);
+    if (!body.success) return response.status(400).json({ error: 'Bevestig een geldige verbruikerschakelaar en gewenste stand.' });
+    const snapshot = store.get();
+    if (!supervisor || demo || !runner?.status().activeAllowed || snapshot.control.mode !== 'active') return response.status(403).json({ error: 'Verbruikerbediening vereist apparaatvrijgave en de stand Actief.' });
+    const { consumerId, switchId, enabled, expectedState } = body.data;
+    if (snapshot.mappings.knownSource !== 'individual' || !snapshot.mappings.knownConsumers.includes(consumerId) || snapshot.mappings.knownConsumerSwitches[consumerId] !== switchId) return response.status(409).json({ error: 'De verbruiker of schakelaar is niet meer zo gekoppeld.' });
+    try {
+      const connection = await entitiesProvider();
+      const actuator = connection.entities.find(entity => entity.id === switchId);
+      if (!connection.connected || !isFresh(actuator, Date.now(), snapshot.control.maxAgeSeconds) || actuator.domain !== 'switch' || actuator.state !== expectedState) return response.status(409).json({ error: 'De schakelaar ontbreekt, is niet recent of heeft inmiddels een andere stand.' });
+      const current = store.get();
+      if (current.control.mode !== 'active' || !runner.status().activeAllowed || current.mappings.knownSource !== 'individual' ||
+        !current.mappings.knownConsumers.includes(consumerId) || current.mappings.knownConsumerSwitches[consumerId] !== switchId) return response.status(409).json({ error: 'Vrijgave of koppeling is gewijzigd; bevestig opnieuw.' });
+      await consumerSwitchProvider(switchId, enabled);
+      return response.json({ consumerId, switchId, enabled });
+    } catch (error) {
+      return response.status(503).json({ error: error.message || 'Verbruikerschakelaar bedienen mislukt.' });
     }
   });
   app.post('/api/battery/enable', async (request, response) => {
@@ -248,13 +270,14 @@ export async function startServer(env = process.env) {
     ? async mappings => demoDailyRecap(recapMeters(mappings, demoEntities()))
     : async mappings => readDailyRecap(env, recapMeters(mappings, (await entitiesProvider()).entities));
   const batterySwitchProvider = (entityId, enabled) => executeRuleCommand({ entityId, service: `switch.turn_${enabled ? 'on' : 'off'}` }, controlEnv);
+  const consumerSwitchProvider = (entityId, enabled) => executeRuleCommand({ entityId, service: `switch.turn_${enabled ? 'on' : 'off'}` }, controlEnv);
   const solarLimitProvider = (entityId, value) => executeRuleCommand({ entityId, service: 'number.set_value', value }, controlEnv);
   const evCommandProvider = command => executeRuleCommand(command, controlEnv);
   const runner = createRuleRunner({ store, provider: entitiesProvider, demo,
     unitProvider: demo ? async () => '°C' : () => readTemperatureUnit(env),
     activeAllowed: supervisor && controlEnv.CONTROL_ENABLED === 'true' && !demo,
     execute: command => executeRuleCommand(command, controlEnv) });
-  const app = createApp({ store, demo, supervisor, entitiesProvider, runner, utilityHistoryProvider, dailyRecapProvider, batterySwitchProvider, solarLimitProvider, evCommandProvider });
+  const app = createApp({ store, demo, supervisor, entitiesProvider, runner, utilityHistoryProvider, dailyRecapProvider, batterySwitchProvider, solarLimitProvider, evCommandProvider, consumerSwitchProvider });
   const server = app.listen(8080, env.HOST || (supervisor ? '0.0.0.0' : '127.0.0.1'), () => {
     runner.start();
     const mode = demo ? 'demo' : runner.status().activeAllowed ? 'sturing toegestaan' : 'regels standaard uit';

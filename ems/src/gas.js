@@ -15,10 +15,35 @@ function addConsumption(bucket, value) {
   bucket.value = (bucket.value ?? 0) + value;
 }
 
+export function utilityPeriodTotals(series) {
+  return Object.fromEntries(Object.entries(series).map(([key, buckets]) => {
+    const values = buckets.map(bucket => bucket.value).filter(value => typeof value === 'number' && Number.isFinite(value) && value >= 0);
+    return [key, { value: values.length ? values.reduce((total, value) => total + value, 0) : null,
+      complete: buckets.length > 0 && values.length === buckets.length }];
+  }));
+}
+
+function utilityTodayTotal(states, now) {
+  const start = new Date(now);
+  start.setHours(0, 0, 0, 0);
+  const baseline = states.filter(point => point.timestamp <= start.getTime()).at(-1);
+  const points = states.filter(point => point.timestamp > start.getTime() && point.timestamp <= now.getTime());
+  if (!baseline || (!points.length && baseline.timestamp !== now.getTime())) return { value: null, complete: false };
+  let previous = baseline;
+  let value = 0;
+  let complete = baseline.timestamp === start.getTime();
+  for (const point of points) {
+    if (point.timestamp - previous.timestamp > HOUR_MS || point.value < previous.value) complete = false;
+    value += point.value >= previous.value ? point.value - previous.value : point.value;
+    previous = point;
+  }
+  return { value, complete: complete && now.getTime() - previous.timestamp <= HOUR_MS };
+}
+
 export function utilityConsumptionSeries(history, now = new Date()) {
   const cutoff = now.getTime() - HISTORY_DAYS * DAY_MS;
   const states = (Array.isArray(history) ? history.flat() : [])
-    .map(item => ({ timestamp: Date.parse(item.last_changed ?? item.last_updated), value: Number(item.state) }))
+    .map(item => ({ timestamp: Date.parse(item.last_changed ?? item.last_updated), value: typeof item.state === 'string' && item.state.trim() !== '' ? Number(item.state) : NaN }))
     .filter(item => Number.isFinite(item.timestamp) && Number.isFinite(item.value) && item.value >= 0)
     .sort((first, second) => first.timestamp - second.timestamp);
   const previousState = states.filter(item => item.timestamp < cutoff).at(-1);
@@ -43,7 +68,7 @@ export function utilityConsumptionSeries(history, now = new Date()) {
     hasBaseline = true;
   }
 
-  return { available: states.length > 1, series };
+  return { available: states.length > 1, series, totals: utilityPeriodTotals(series), today: utilityTodayTotal(states, now) };
 }
 
 export async function readUtilityHistory(env, entityId, request = fetch, now = new Date()) {

@@ -21,6 +21,7 @@ Onder **Koppelingen** vind je een zoekveld en keuzelijsten met bestaande entitei
 | Bekend verbruik | Optionele totaalsensor voor de bekende apparaten in W of kW |
 | Batterijvermogen | Getekende `sensor` aan de woningzijde van de batterij, in W of kW |
 | Zonnepanelen | `sensor`, actueel productievermogen in W of kW |
+| Zonneopbrengst vandaag | Optionele `sensor`, daadwerkelijk opgewekte energie sinds middernacht in Wh of kWh; geen levensduurtotaal |
 | Kamertemperatuur | `sensor`, temperatuur in graden Celsius |
 | Verwarming | `climate` |
 | Laadpaal | `sensor`, actueel laadvermogen in W of kW |
@@ -46,6 +47,12 @@ Onder **Bekende verbruikers** kies je een van twee bronnen:
 
 Selecteer geen groepmeter samen met de onderliggende apparaten. Gridnest kan een fysieke overlap tussen verschillende sensoren niet automatisch herkennen. Een exact dubbele entiteit en gekoppelde woning-, productie-, net- of batterijmeters als los apparaat worden geweigerd.
 
+Bij geselecteerde bekende apparaten kun je optioneel een aan/uitschakelaar koppelen. Elk apparaat heeft maximaal een unieke `switch`-entiteit. Het verbruikersblok toont een aan/uit-icoon: rood bij een werkelijk uitgeschakelde switch, wit bij ingeschakeld, grijs bij onbekende status. Nul watt betekent niet automatisch uit. Bediening vraagt bevestiging en vereist apparaatvrijgave, Stroom in Actief en een recente ongewijzigde schakelstatus. Uitschakelen kan een lopend apparaatproces onderbreken; koppel alleen geschikte switches. De bediening wijzigt niet automatisch eigen Stroomregels.
+
+Gas en water tonen geen cumulatieve totaalstand meer. Bij iedere grafiek staat de som van het getoonde verbruik over 24 uur, 7 dagen of 30 dagen in m3. Ontbrekende meetpunten maken het totaal onvolledig; zonder bruikbare historie verschijnt niet beschikbaar.
+
+De dagrecap bevat woningverbruik en teruglevering, plus laadpaal en batterij laden/ontladen voor zover die zijn gekoppeld. Woningverbruik komt uit de woningmeter of een volledige energiebalans, nooit alleen uit netafname. De twee hoofdtotalen blijven zichtbaar als Niet beschikbaar wanneer de benodigde meters ontbreken. Gas en water verschijnen alleen na inschakelen en koppelen, en tonen verbruik sinds middernacht in plaats van de laatste 24 uur. Onvolledige meetdekking blijft gemarkeerd. Losse verbruikers, fasen en zonne-opwek staan niet in deze compacte recap; apparaatpagina's behouden hun eigen dagtotalen.
+
 **Onbekend / niet toegewezen = totaal woningverbruik - bekend verbruik.** Dit is een restberekening, geen herkenning van individuele apparaten. Bij een ontbrekende geselecteerde meting is de uitsplitsing niet compleet. Een bekende som hoger dan het totaal levert een waarschuwing op, geen negatief onbekend verbruik. Niet-gelijktijdige metingen kunnen eveneens een verschil veroorzaken.
 
 Home Assistant ondersteunt koppelingen met veel merken; Gridnest gebruikt die entiteiten, niet eigen fabrikantaccounts. Niet ieder apparaat heeft een veilige bedieningsentiteit. Een koppeling is daarom nog geen bewijs dat het apparaat automatisch kan worden gestuurd.
@@ -56,13 +63,13 @@ Laadpaal en Accu tonen een centraal apparaatbeeld, bedieningsknoppen en compacte
 
 Koppel bij Laadpaal optioneel een laadschakelaar (`switch`), stroomlimiet (`number` in A) en kabelslot (`lock`). Starten vereist een recent aangesloten kabel; de stroomlimiet is begrensd op 6–32 A en het bereik en de stap van de entiteit. Ontgrendelen vereist recent gemeten nulvermogen. Iedere laadpaalopdracht vraagt bevestiging en vereist apparaatvrijgave plus Stroom in Actief. Actieve regels kunnen handmatige waarden later overschrijven.
 
-Bij Zonnepanelen staat Opwek vandaag naast de verwachte dagopbrengst. De werkelijke opbrengst wordt uit de vermogenshistorie geschat; onvolledige historie blijft gemarkeerd. De productielimietslider wordt bij loslaten toegepast na toestemming voor de huidige browsersessie en gekoppelde entiteit. Na herladen of een mislukte opdracht is opnieuw toestemming nodig. Vrijgave, Actief en recente geldige telemetrie blijven verplicht.
+Bij Zonnepanelen staat de actuele dagopbrengst naast de verwachte dagopbrengst. Een gekoppelde **Zonneopbrengst vandaag** heeft voorrang; Wh wordt omgerekend naar kWh. Zonder die koppeling wordt het dagtotaal uit de vermogenshistorie geschat en blijft onvolledige historie gemarkeerd. Een gekoppelde maar ongeldige dagmeter wordt niet stil vervangen door een schatting. De uurgrafiek gebruikt vermogenshistorie en kan daardoor afwijken van de aparte dagmeter. De productielimietslider wordt bij loslaten toegepast na toestemming voor de huidige browsersessie en gekoppelde entiteit. Na herladen of een mislukte opdracht is opnieuw toestemming nodig. Vrijgave, Actief en recente geldige telemetrie blijven verplicht.
 
 ## Mijn wensen
 
 Onder **Metingen verversen** kies je 5, 10, 30 of 60 seconden, of alleen handmatig. De standaard is 10 seconden. Sla de wensen op om het interval te bewaren. De vernieuwknop blijft beschikbaar; het gekozen interval geldt voor het ophalen van metingen, niet voor de regelcyclus. Automatisch verversen wacht bij een verborgen pagina, open dialoog of actieve slider.
 
-Stel comforttemperatuur, afwezigtemperatuur, dagelijkse aanwezigheid, maximaal netvermogen, gewenste laadenergie en een laadtermijn in. Tijden zijn Nederlandse lokale uren en ondersteunen in deze eerste versie een periode binnen dezelfde dag. Nieuwe kamers beginnen op de comforttemperatuur; de afwezigtemperatuur kan via de optionele kamerregeling worden toegepast. Overige wensen vormen niet vanzelf stroomregels of roosters. Een kW-limiet is geen vervanging voor beveiliging van afzonderlijke fasen.
+Stel comforttemperatuur, afwezigtemperatuur, dagelijkse aanwezigheid, maximaal netvermogen, gewenste laadenergie en een laadtermijn in. Aanwezig vanaf/tot wordt opgeslagen, maar de huidige warmteregelaar gebruikt deze tijden niet als rooster of als fallback bij ontbrekende personen. Nieuwe kamers beginnen op de comforttemperatuur; de afwezigtemperatuur kan via de optionele kamerregeling op basis van sensoren/personen worden toegepast. Maximaal netvermogen, gewenste laadenergie, laadtermijn en voorkeur voor zonnestroom maken momenteel geen automatisch laadplan en sturen niet zelfstandig de laadpaal. Daarvoor zijn handmatige bediening of eigen Stroomregels nodig. Een kW-limiet is geen vervanging voor beveiliging van afzonderlijke fasen.
 
 ### Meerdere personen
 
@@ -71,6 +78,8 @@ Onder **Aanwezigheid huishouden** selecteer je personen (`person`), apparaatvolg
 Standaard geldt **Minstens een persoon thuis**: een bekende aanwezige persoon is voldoende; afwezig geldt pas als alle geselecteerde bronnen bekend afwezig zijn. Een verdwenen, onbeschikbare of onbekende bron telt niet als afwezig. De optionele keuze **Iedereen thuis** vereist dat alle geselecteerde personen thuis zijn; iemand die aantoonbaar weg is maakt die voorwaarde onwaar, ook als een ander nog thuis is.
 
 Schakel per kamer **Afwezigtemperatuur toepassen bij afwezigheid** in om aanwezigheid ook voor sturing te gebruiken. Een expliciete kamersensor heeft voorrang; zonder kamersensor gebruikt Gridnest de huishoudelijke personenkeuze. Bij afwezigheid geldt de laagste van kamerdoel en afwezigtemperatuur, zonder zonneboost. Bij aanwezigheid geldt weer het vaste kamerdoel. De afwezigheidsoptie staat standaard uit.
+
+De Aanwezig/Afwezig-badge op een kamer verschijnt uitsluitend als die kamer een eigen aanwezigheidssensor heeft en de status bekend is. Huishoudelijke aanwezigheid wordt niet als gemeten kameraanwezigheid getoond; de optionele regeling kan die huishoudelijke aanwezigheid wel blijven gebruiken.
 
 Voor sturing moeten de aanwezigheidssignalen recent zijn volgens de ingestelde maximale meetouderdom. Bij onzekere of te oude aanwezigheid wordt de betrokken bronregeling geblokkeerd, niet automatisch verlaagd. De overzichtsbadge toont de laatst bekende beschikbare status; de controle voor sturing is strenger. Wijzigingen van personen, any/all-keuze of afwezigtemperatuur zetten betrokken actieve Warmte terug naar proefmodus. De thermostaat behoudt zijn laatst ingestelde doel totdat een volgende toegestane opdracht volgt.
 

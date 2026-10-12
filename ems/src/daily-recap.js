@@ -23,11 +23,46 @@ export function recapMeters(mappings, entities) {
   for (const phase of [1, 2, 3]) add(mappings[`phase${phase}Power`], `Fase L${phase}`, 'consumption');
   if (mappings.gridMode === 'signed') add(mappings.gridPower, 'Netvermogen', 'grid', true, mappings.gridDirection === 'positive-export' ? -1 : 1);
   if (mappings.batteryMode === 'measured') add(mappings.batteryPower, 'Batterijvermogen', 'battery', true, mappings.batteryDirection === 'positive-discharge' ? -1 : 1);
+  else {
+    add(mappings.batteryInputPower, 'Batterij laden', 'consumption');
+    add(mappings.batteryOutputPower, 'Batterij ontladen', 'consumption');
+  }
   if (mappings.knownSource === 'aggregate') add(mappings.knownConsumption, 'Bekende verbruikers', 'consumption');
   else {
     for (const id of mappings.knownConsumers ?? []) add(id, mappings.knownConsumerNames?.[id]?.trim() || byId.get(id)?.name || id, 'consumption');
   }
   return meters;
+}
+
+export function dailyOverviewRows(recap, mappings, utilities = {}) {
+  const rows = [];
+  const find = (role, label) => recap.rows.find(row => row.entityId === mappings[role] && row.label === label);
+  const add = (label, row, unit = 'kWh') => rows.push({ label, value: row?.energyKwh ?? row?.value ?? null, complete: Boolean(row?.complete), unit });
+  if (mappings.totalConsumption) add('Woningverbruik', find('totalConsumption', 'Woningverbruik'));
+  else if (mappings.solar && (mappings.gridMode === 'signed' ? mappings.gridPower : mappings.gridImport && mappings.gridExport) && ['none', 'measured'].includes(mappings.batteryMode)) {
+    const imported = find(mappings.gridMode === 'signed' ? 'gridPower' : 'gridImport', 'Netafname');
+    const exported = find(mappings.gridMode === 'signed' ? 'gridPower' : 'gridExport', 'Teruglevering');
+    const solar = find('solar', 'Zonnepanelen');
+    const charge = find('batteryPower', 'Batterij laden');
+    const discharge = find('batteryPower', 'Batterij ontladen');
+    const inputs = [imported, exported, solar, ...(mappings.batteryMode === 'measured' ? [charge, discharge] : [])];
+    const valid = inputs.every(row => row?.energyKwh !== null && row?.energyKwh !== undefined);
+    const value = valid ? imported.energyKwh - exported.energyKwh + solar.energyKwh - (charge?.energyKwh ?? 0) + (discharge?.energyKwh ?? 0) : null;
+    add('Woningverbruik', { energyKwh: value !== null && value >= 0 ? value : null, complete: valid && inputs.every(row => row.complete) });
+  } else add('Woningverbruik', null);
+  add('Teruglevering', find(mappings.gridMode === 'signed' ? 'gridPower' : 'gridExport', 'Teruglevering'));
+  if (mappings.evPower) add('Laadpaal', find('evPower', 'Laadpaal'));
+  if (mappings.batteryMode === 'measured' && mappings.batteryPower) {
+    add('Batterij laden', find('batteryPower', 'Batterij laden'));
+    add('Batterij ontladen', find('batteryPower', 'Batterij ontladen'));
+  } else {
+    if (mappings.batteryInputPower) add('Batterij laden', find('batteryInputPower', 'Batterij laden'));
+    if (mappings.batteryOutputPower) add('Batterij ontladen', find('batteryOutputPower', 'Batterij ontladen'));
+  }
+  for (const [utility, title] of [['gas', 'Gas'], ['water', 'Water']]) {
+    if (utilities[utility]) add(title, utilities[utility], 'm³');
+  }
+  return rows;
 }
 
 function wattsFor(state, meter) {
@@ -52,6 +87,7 @@ export function dailyEnergyRecap(history, meters, now = new Date()) {
     let complete = Boolean(previous && start - previous.timestamp <= MAX_GAP_MS);
     let coverageMs = 0;
     const totals = new Map();
+    const hours = Array.from({ length: 24 }, (_, hour) => ({ hour, energyKwh: 0, coverageMs: 0, complete: true }));
 
     for (let pointIndex = 0; pointIndex < points.length; pointIndex++) {
       const point = points[pointIndex];
@@ -73,6 +109,20 @@ export function dailyEnergyRecap(history, meters, now = new Date()) {
           : point.watts >= 0 ? 'Batterij laden' : 'Batterij ontladen'
         : meter.label;
       totals.set(label, (totals.get(label) ?? 0) + Math.abs(point.watts) * duration / 3_600_000_000);
+      if (meter.kind === 'production') {
+        let cursor = from;
+        while (cursor < to) {
+          const date = new Date(cursor);
+          const bucket = hours[date.getHours()];
+          date.setHours(date.getHours() + 1, 0, 0, 0);
+          const until = Math.min(to, date.getTime());
+          const slice = until - cursor;
+          bucket.energyKwh += Math.abs(point.watts) * slice / 3_600_000_000;
+          bucket.coverageMs += slice;
+          if (duration > MAX_GAP_MS || (next && next.timestamp - point.timestamp > MAX_GAP_MS)) bucket.complete = false;
+          cursor = until;
+        }
+      }
     }
 
     const labels = meter.kind === 'grid' ? ['Netafname', 'Teruglevering']
@@ -80,7 +130,16 @@ export function dailyEnergyRecap(history, meters, now = new Date()) {
     for (const label of labels) {
       rows.push({ label, entityId: meter.id, kind: meter.kind,
         energyKwh: coverageMs ? totals.get(label) ?? 0 : null,
-        complete: complete && coverageMs >= Math.max(0, end - start - MAX_GAP_MS) });
+        complete: complete && coverageMs >= Math.max(0, end - start - MAX_GAP_MS),
+        ...(meter.kind === 'production' ? { hours: hours.map(bucket => {
+          const hourStart = new Date(start);
+          hourStart.setHours(bucket.hour);
+          const hourEnd = new Date(hourStart);
+          hourEnd.setHours(bucket.hour + 1);
+          const expectedMs = Math.max(0, Math.min(end, hourEnd.getTime()) - hourStart.getTime());
+          return { hour: bucket.hour, energyKwh: bucket.coverageMs ? bucket.energyKwh : null,
+            complete: expectedMs > 0 && bucket.complete && bucket.coverageMs >= expectedMs };
+        }) } : {}) });
     }
   });
   return { available: rows.some(row => row.energyKwh !== null), complete: rows.length > 0 && rows.every(row => row.complete), rows };

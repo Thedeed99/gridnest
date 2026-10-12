@@ -3,11 +3,12 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY web ./web
+COPY src/daily-recap.js ./src/daily-recap.js
 COPY public/index.html ./public/index.html
 RUN npm run build && npm prune --omit=dev
 
 FROM node:22-alpine
-ARG BUILD_VERSION=0.1.5
+ARG BUILD_VERSION=0.1.6
 LABEL io.hass.name="Gridnest" \
       io.hass.description="Lokale energie- en comfortmonitor" \
       io.hass.version="${BUILD_VERSION}" \

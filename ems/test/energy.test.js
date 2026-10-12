@@ -137,3 +137,16 @@ test('gemeten fasevermogen in kW heeft voorrang op de VA-schatting', () => {
   assert.equal(result.phaseLoads[0].activePowerKw, 0.15);
   assert.equal(result.phaseLoads[0].apparentPowerVA, 1150);
 });
+
+test('gekoppelde zonne-dagopbrengst normaliseert Wh en kWh zonder ontbrekende waarden als nul te tonen', () => {
+  const mappings = { ...emptyMappings, solarToday: 'sensor.solar_today' };
+  const value = entity => energySummary(mappings, entity ? [entity] : []).solarOutlook.actualTodayKwh;
+  assert.equal(value(sensor('sensor.solar_today', 210, 'Wh')), 0.21);
+  assert.equal(value(sensor('sensor.solar_today', 0.21, 'kWh')), 0.21);
+  assert.equal(value(sensor('sensor.solar_today', 0, 'kWh')), 0);
+  for (const state of ['unknown', 'unavailable', '', 'abc', -1]) {
+    assert.equal(value(sensor('sensor.solar_today', state, 'kWh')), null);
+  }
+  assert.equal(value(sensor('sensor.solar_today', 210, 'W')), null);
+  assert.equal(value(), null);
+});
