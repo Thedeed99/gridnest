@@ -49,6 +49,13 @@ test('directe woningmeting heeft voorrang, bekende apparaten worden een keer get
   assert.equal(result.unknownKw, 1);
 });
 
+test('eigen verbruikersnamen overschrijven alleen de getoonde naam', () => {
+  const mappings = { ...emptyMappings, knownConsumers: ['sensor.ev'], knownConsumerNames: { 'sensor.ev': 'Auto laden' } };
+  const result = energySummary(mappings, [sensor('sensor.ev', 1200)]);
+  assert.equal(result.consumers[0].name, 'Auto laden');
+  assert.equal(result.consumers[0].powerKw, 1.2);
+});
+
 test('bekende totaalsensor en afzonderlijke apparaten worden nooit opgeteld', () => {
   const result = energySummary({ ...emptyMappings, totalConsumption: 'sensor.total', knownConsumption: 'sensor.known', knownSource: 'aggregate', knownConsumers: ['sensor.ev'] }, [sensor('sensor.total', 3000), sensor('sensor.known', 2000), sensor('sensor.ev', 1000)]);
   assert.equal(result.knownKw, 2);
@@ -86,5 +93,29 @@ test('bestaande koppelingen en wensen krijgen veilige standaardwaarden', () => {
   assert.equal(preferencesSchema.parse(legacyPreferences).heatingProfile, 'unspecified');
   assert.equal(mappingsSchema.parse({ gridImport: 'sensor.net' }).gridMode, 'separate');
   assert.equal(mappingsSchema.parse({}).batteryMode, 'unknown');
+  assert.deepEqual(mappingsSchema.parse({}).knownConsumerNames, {});
+  assert.equal(preferencesSchema.parse(legacyPreferences).showGas, false);
+  assert.equal(preferencesSchema.parse(legacyPreferences).showWater, false);
   assert.throws(() => preferencesSchema.parse({ ...defaultPreferences, heatingProfile: 'always-on' }));
+});
+
+test('fasestroom en spanning worden per fase als schijnbaar vermogen in VA berekend', () => {
+  const mappings = { ...emptyMappings, phase1Current: 'sensor.l1_current', phase1Voltage: 'sensor.l1_voltage' };
+  const result = energySummary(mappings, [
+    sensor('sensor.l1_current', 5, 'A'), sensor('sensor.l1_voltage', 230, 'V')
+  ]);
+  assert.deepEqual(result.phaseLoads[0], { phase: 'L1', currentA: 5, voltageV: 230, apparentPowerVA: 1150 });
+  assert.deepEqual(result.phaseLoads.slice(1), [
+    { phase: 'L2', currentA: null, voltageV: null, apparentPowerVA: null },
+    { phase: 'L3', currentA: null, voltageV: null, apparentPowerVA: null }
+  ]);
+});
+
+test('zonneverwachting vergelijkt forecast sensoren met actuele productie', () => {
+  const mappings = { ...emptyMappings, solar: 'sensor.solar', solarExpectedNow: 'sensor.forecast_now', solarExpectedToday: 'sensor.forecast_today' };
+  const entities = [sensor('sensor.solar', 2100), sensor('sensor.forecast_now', 2500), sensor('sensor.forecast_today', 9.55, 'kWh')];
+  const result = energySummary(mappings, entities);
+  assert.equal(result.solarOutlook.actualNowKw, 2.1);
+  assert.equal(result.solarOutlook.expectedNowKw, 2.5);
+  assert.equal(result.solarOutlook.expectedTodayKwh, 9.55);
 });

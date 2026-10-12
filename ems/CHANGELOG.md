@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.1.4 - 2026-10-12
+
+- Maak warmtebronnen en Stroomregels aan in browsers zonder `crypto.randomUUID()`; de mobiele Stroom-knop opent de editor.
+- Beheer aanwezigheid alleen op Mijn wensen en bewerk eigen namen voor bekende verbruikers.
+- Voeg een schakelbare dark mode en een inklapbaar mobiel zijmenu toe.
+- Toon gas- en waterhistorie alleen na opt-in op Mijn wensen, onder Warmte in huis.
+- Voeg een elektrische dagrecap en conditionele detailtabs voor laadpaal, accu en zonnepanelen toe.
+- Toon optionele accuhealth op de accu-detailpagina wanneer Home Assistant die sensor aanbiedt.
+- Vergelijk optioneel verwacht zonnevermogen nu en verwachte dagopbrengst met gemeten productie.
+- Toon gekoppelde fasestroom en spanning met correct gelabeld schijnbaar vermogen in VA.
+
+## 0.1.3 - 2026-10-12
+
+- Maak warmtebronnen en Stroomregels aan in browsers zonder `crypto.randomUUID()`.
+- Verwijder aanwezigheid uit Koppelingen; beheer dit via Mijn wensen.
+- Geef geselecteerde verbruikers een eigen bewerkbare weergavenaam.
+- Voeg een handmatig schakelbare dark mode toe, standaard afgestemd op de apparaatvoorkeur.
+- Vervang de mobiele navigatierij door een inklapbaar zijmenu.
+
 ## 0.1.2 - 2026-10-12
 
 - Lees de Supervisor-optie voordat de server als niet-rootgebruiker start.

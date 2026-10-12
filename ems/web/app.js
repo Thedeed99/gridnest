@@ -1,6 +1,8 @@
-import { createIcons, Activity, Link, SlidersHorizontal, RefreshCw, HousePlug, House, Sun, Plug, Car, Heater, BatteryCharging, Thermometer, ArrowUpRight, Save, Search, Check, Unplug, Plus, Pencil, Trash2, X, ListChecks, Pause, Play } from 'lucide';
+import { createIcons, Activity, Link, SlidersHorizontal, RefreshCw, HousePlug, House, Sun, Moon, Flame, Droplet, Plug, Car, Heater, BatteryCharging, Thermometer, ArrowUpRight, Save, Search, Check, Unplug, Plus, Pencil, Trash2, X, ListChecks, Pause, Play, Menu } from 'lucide';
+import { Chart } from 'chart.js/auto';
+import { createId } from './ids.js';
 
-const icons = { Activity, Link, SlidersHorizontal, RefreshCw, HousePlug, House, Sun, Plug, Car, Heater, BatteryCharging, Thermometer, ArrowUpRight, Save, Search, Check, Unplug, Plus, Pencil, Trash2, X, ListChecks, Pause, Play };
+const icons = { Activity, Link, SlidersHorizontal, RefreshCw, HousePlug, House, Sun, Moon, Flame, Droplet, Plug, Car, Heater, BatteryCharging, Thermometer, ArrowUpRight, Save, Search, Check, Unplug, Plus, Pencil, Trash2, X, ListChecks, Pause, Play, Menu };
 const main = document.querySelector('#main');
 let data;
 let view = 'overview';
@@ -10,6 +12,9 @@ let controlDraft;
 let search = '';
 let loading = false;
 let noticeTimeout;
+let utilityCharts = [];
+const utilityHistoryCache = {};
+let dailyRecapCache;
 
 const icon = name => {
   const node = document.createElement('i');
@@ -55,12 +60,30 @@ async function api(path, options = {}) {
   return body;
 }
 
+function syncDeviceNavigation() {
+  const rules = data.control?.rules ?? [];
+  const visibility = {
+    ev: Boolean(data.mappings.evPower || rules.some(rule => ['ev_enable', 'ev_current'].includes(rule.action.type))),
+    battery: data.mappings.batteryMode === 'measured' || Boolean(data.mappings.batterySoc || data.mappings.batteryHealth) || rules.some(rule => rule.action.type === 'battery_power'),
+    solar: Boolean(data.mappings.solar || data.mappings.knownSource === 'aggregate' && data.mappings.knownConsumption)
+  };
+  for (const [device, visible] of Object.entries(visibility)) {
+    document.querySelector(`[data-view="${device}"]`).hidden = !visible;
+    if (!visible && view === device) view = 'overview';
+  }
+  for (const button of document.querySelectorAll('[data-view]')) {
+    if (button.dataset.view === view) button.setAttribute('aria-current', 'page');
+    else button.removeAttribute('aria-current');
+  }
+}
+
 async function refresh() {
   if (loading) return;
   loading = true;
   document.querySelector('#refresh').disabled = true;
   try {
     data = await api('bootstrap');
+    syncDeviceNavigation();
     mappingsDraft ??= { ...data.mappings };
     preferencesDraft ??= { ...data.preferences };
     controlDraft ??= structuredClone(data.control);
@@ -90,8 +113,32 @@ function heading(title, subtitle) {
   return header;
 }
 
+function solarOutlook(parent) {
+  const outlook = data.energy?.solarOutlook;
+  const hasNow = Boolean(data.mappings.solarExpectedNow);
+  const hasToday = Boolean(data.mappings.solarExpectedToday);
+  if (!hasNow && !hasToday) return;
+  const section = element('section', 'solar-outlook');
+  section.append(element('h3', '', 'Zonne-opbrengst · verwachting en werkelijk'));
+  if (hasNow) {
+    const row = element('div', 'solar-outlook-row');
+    row.append(element('strong', '', 'Nu'), element('span', '', `Verwacht ${powerText(outlook.expectedNowKw)}`), element('span', '', `Actueel ${powerText(outlook.actualNowKw)}`));
+    section.append(row);
+  }
+  if (hasToday) {
+    const row = element('div', 'solar-outlook-row');
+    row.append(element('strong', '', 'Vandaag'), element('span', '', `Verwacht ${outlook.expectedTodayKwh === null ? 'niet beschikbaar' : `${number(outlook.expectedTodayKwh)} kWh`}`));
+    const actual = element('span', 'solar-actual-today', 'Werkelijk dagtotaal ophalen…');
+    actual.id = 'solar-actual-today';
+    row.append(actual);
+    section.append(row);
+  }
+  parent.append(section);
+}
+
 function overview() {
-  const mapped = data.roles.filter(role => Boolean(data.mappings[role.id])).length;
+  const visibleRoles = data.roles.filter(role => role.id !== 'presence');
+  const mapped = visibleRoles.filter(role => Boolean(data.mappings[role.id])).length;
   heading('Energie in huis', data.demo ? 'Voorbeeldwoning · fictieve meetwaarden' : 'Actuele metingen uit Home Assistant');
   const metrics = element('section', 'metrics');
   metrics.setAttribute('aria-label', 'Actuele meetwaarden');
@@ -116,12 +163,34 @@ function overview() {
     flow.append(node);
   }
   section.append(sectionHeader, flow);
+  solarOutlook(section);
+  const phases = (data.energy?.phaseLoads ?? []).filter((item, index) => data.mappings[`phase${index + 1}Current`] || data.mappings[`phase${index + 1}Voltage`]);
+  if (phases.length) {
+    const phaseSection = element('section', 'phase-loads');
+    phaseSection.append(element('h3', '', 'Per fase'));
+    const rows = element('div', 'phase-load-grid');
+    for (const phase of phases) {
+      const row = element('div', 'phase-load-row');
+      row.append(element('strong', '', phase.phase));
+      const values = element('div', 'phase-load-values');
+      values.append(element('span', '', phase.currentA === null ? '— A' : `${number(phase.currentA)} A`));
+      values.append(element('span', '', phase.voltageV === null ? '— V' : `${number(phase.voltageV)} V`));
+      values.append(element('strong', '', phase.apparentPowerVA === null ? '— VA' : `${number(phase.apparentPowerVA)} VA`));
+      row.append(values);
+      rows.append(row);
+    }
+    phaseSection.append(rows, element('p', 'muted', 'A × V is schijnbaar vermogen (VA); werkelijk vermogen in W vereist ook de arbeidsfactor.'));
+    section.append(phaseSection);
+  }
   main.append(section);
   consumptionSplit();
   heatOverview();
+  if (data.preferences.showGas) utilityPanel('gas');
+  if (data.preferences.showWater) utilityPanel('water');
+  dailyRecapPanel();
   const status = element('section', 'setup-status');
   const statusText = element('div');
-  statusText.append(element('h2', '', `${mapped} van ${data.roles.length} entiteiten gekoppeld`), element('p', 'subtitle', `Regelaar: ${{ off: 'uit', preview: 'proefmodus', active: 'actief' }[data.control?.mode] ?? 'uit'}`));
+  statusText.append(element('h2', '', `${mapped} van ${visibleRoles.length} entiteiten gekoppeld`), element('p', 'subtitle', `Regelaar: ${{ off: 'uit', preview: 'proefmodus', active: 'actief' }[data.control?.mode] ?? 'uit'}`));
   const button = element('button', 'secondary-button', 'Koppelingen');
   button.prepend(icon('link'));
   button.addEventListener('click', () => navigate('entities'));
@@ -162,6 +231,51 @@ function consumptionSplit() {
   }
   for (const warning of energy.warnings) section.append(element('p', 'energy-warning', warning));
   main.append(section);
+}
+
+async function loadDailyRecap(container, reload = false, filter = null) {
+  try {
+    const mappingsKey = JSON.stringify(data.mappings);
+    if (reload || !dailyRecapCache || dailyRecapCache.mappingsKey !== mappingsKey || Date.now() - dailyRecapCache.fetchedAt > 300000) {
+      dailyRecapCache = { ...await api('daily-recap'), fetchedAt: Date.now(), mappingsKey };
+    }
+    if (!document.body.contains(container)) return;
+    container.replaceChildren();
+    const recap = dailyRecapCache;
+    const solarActual = document.querySelector('#solar-actual-today');
+    if (solarActual) {
+      const solarRow = recap.rows.find(row => row.label === 'Zonnepanelen');
+      solarActual.textContent = solarRow?.energyKwh === null || solarRow?.energyKwh === undefined
+        ? 'Werkelijk vandaag: onvolledig'
+        : `Werkelijk vandaag: ${number(solarRow.energyKwh)} kWh`;
+    }
+    const rows = filter ? recap.rows.filter(row => filter(row)) : recap.rows;
+    if (!rows.length) {
+      container.append(element('p', 'empty-state', 'Dagtotalen verschijnen zodra er elektrische vermogensmeters zijn gekoppeld.'));
+      return;
+    }
+    if (!recap.complete) container.append(element('p', 'energy-warning', 'Onvolledige schatting: er ontbreken meetpunten of er zitten lange gaten in de metingen.'));
+    const list = element('ul', 'daily-recap-list');
+    for (const row of rows) {
+      const item = element('li', 'daily-recap-row');
+      item.append(element('span', '', row.label), element('strong', '', row.energyKwh === null ? 'Onvolledig' : `${number(row.energyKwh)} kWh`));
+      list.append(item);
+    }
+    container.append(list);
+  } catch (error) {
+    if (document.body.contains(container)) container.replaceChildren(element('p', 'energy-warning', error.message));
+  }
+}
+
+function dailyRecapPanel() {
+  const section = element('section', 'daily-recap-section');
+  const header = element('div', 'section-heading');
+  header.append(element('h2', '', 'Dagrecap vandaag'), toolButton('refresh-cw', 'Dagrecap vernieuwen', () => loadDailyRecap(content, true)));
+  const content = element('div', 'daily-recap-content');
+  content.append(element('p', 'muted', 'Dagtotalen laden…'));
+  section.append(header, content);
+  main.append(section);
+  loadDailyRecap(content);
 }
 
 function toolButton(name, title, action) {
@@ -514,10 +628,10 @@ function editThermal(kind, id = null, floor = '') {
       const values = new FormData(form);
       const next = structuredClone(data.thermal ?? { rooms: [], sources: [] });
       const item = isRoom ? {
-        id: id ?? crypto.randomUUID(), name: values.get('name'), floor: values.get('floor'),
+        id: id ?? createId(), name: values.get('name'), floor: values.get('floor'),
         temperatureEntity: values.get('temperatureEntity') || null, presenceEntity: values.get('presenceEntity') || null,
         targetC: Number(values.get('targetC')), presenceControl: values.has('presenceControl'), sourceIds: values.getAll('sourceIds')
-      } : { ...original, id: id ?? crypto.randomUUID(), name: values.get('name'), entityId: values.get('entityId') || null, profile: values.get('profile') };
+      } : { ...original, id: id ?? createId(), name: values.get('name'), entityId: values.get('entityId') || null, profile: values.get('profile') };
       if (!isRoom) {
         item.controlEnabled = values.has('controlEnabled'); item.confirmed = values.has('confirmed');
         item.controlRoomId = values.get('controlRoomId') || null; item.priority = Number(values.get('priority'));
@@ -689,7 +803,7 @@ function rulesView() {
 
 function editRule(id = null) {
   const original = data.control.rules.find(rule => rule.id === id);
-  const draft = original ? structuredClone(original) : { id: crypto.randomUUID(), name: '', priority: 50, enabled: false, confirmed: false, conditions: [{ entityId: '', operator: 'gt', value: 0 }], action: { type: 'ev_enable', entityId: '', value: 'on', otherwise: 'off', batteryDirection: 'positive-charge' } };
+  const draft = original ? structuredClone(original) : { id: createId(), name: '', priority: 50, enabled: false, confirmed: false, conditions: [{ entityId: '', operator: 'gt', value: 0 }], action: { type: 'ev_enable', entityId: '', value: 'on', otherwise: 'off', batteryDirection: 'positive-charge' } };
   const dialog = element('dialog', 'thermal-dialog rule-dialog');
   dialog.setAttribute('aria-label', original ? 'Stroomregel bewerken' : 'Stroomregel toevoegen');
   const form = element('form');
@@ -890,6 +1004,7 @@ function entities() {
   function buildRows() {
     list.replaceChildren();
     for (const role of data.roles) {
+      if (role.id === 'presence') continue;
       if (['gridImport', 'gridExport'].includes(role.id) && mappingsDraft.gridMode === 'signed') continue;
       if (role.id === 'gridPower' && mappingsDraft.gridMode !== 'signed') continue;
       if (role.id === 'batteryPower' && mappingsDraft.batteryMode !== 'measured') continue;
@@ -931,8 +1046,9 @@ function entities() {
       const excluded = ['totalConsumption', 'knownConsumption', 'gridPower', 'gridImport', 'gridExport', 'solar', 'batteryPower'].map(role => mappingsDraft[role]);
       const candidates = data.entities.filter(entity => entity.domain === 'sensor' && ['W', 'kW'].includes(entity.unit) &&
         (selected.includes(entity.id) || (!excluded.includes(entity.id) && `${entity.name} ${entity.id}`.toLowerCase().includes(search.toLowerCase()))));
-      const choices = element('div', 'consumer-choices');
+      const choices = element('div', 'known-consumer-choices');
       for (const entity of candidates) {
+        const row = element('div', 'known-consumer-row');
         const label = element('label', 'consumer-choice');
         const checkbox = element('input');
         checkbox.type = 'checkbox';
@@ -942,22 +1058,58 @@ function entities() {
         checkbox.addEventListener('change', () => {
           const next = new Set(mappingsDraft.knownConsumers ?? []);
           if (checkbox.checked) next.add(entity.id);
-          else next.delete(entity.id);
+          else {
+            next.delete(entity.id);
+            delete mappingsDraft.knownConsumerNames?.[entity.id];
+          }
           mappingsDraft.knownConsumers = [...next];
+          buildRows();
         });
         const text = element('span');
         text.append(element('strong', '', entity.name), element('small', '', `${entity.id}${entity.available ? '' : ' · niet beschikbaar'}`));
         label.append(checkbox, text);
-        choices.append(label);
+        row.append(label);
+        if (selected.includes(entity.id)) {
+          const nameLabel = element('label', 'consumer-name-setting');
+          nameLabel.append(element('span', '', 'Eigen naam'));
+          const nameInput = element('input', 'text-input');
+          Object.assign(nameInput, { type: 'text', maxLength: 80, value: mappingsDraft.knownConsumerNames?.[entity.id] ?? '', placeholder: entity.name });
+          nameInput.setAttribute('aria-label', `Eigen naam voor ${entity.name}`);
+          nameInput.addEventListener('input', () => {
+            mappingsDraft.knownConsumerNames ??= {};
+            if (nameInput.value.trim()) mappingsDraft.knownConsumerNames[entity.id] = nameInput.value;
+            else delete mappingsDraft.knownConsumerNames[entity.id];
+          });
+          nameLabel.append(nameInput);
+          row.append(nameLabel);
+        }
+        choices.append(row);
       }
       for (const id of selected.filter(id => !candidates.some(entity => entity.id === id))) {
+        const row = element('div', 'known-consumer-row');
         const label = element('label', 'consumer-choice');
         const checkbox = element('input');
         checkbox.type = 'checkbox';
         checkbox.checked = true;
-        checkbox.addEventListener('change', () => { mappingsDraft.knownConsumers = (mappingsDraft.knownConsumers ?? []).filter(value => value !== id); });
+        checkbox.addEventListener('change', () => {
+          mappingsDraft.knownConsumers = (mappingsDraft.knownConsumers ?? []).filter(value => value !== id);
+          delete mappingsDraft.knownConsumerNames?.[id];
+          buildRows();
+        });
         label.append(checkbox, element('span', '', `${id} · niet beschikbaar`));
-        choices.append(label);
+        const nameLabel = element('label', 'consumer-name-setting');
+        nameLabel.append(element('span', '', 'Eigen naam'));
+        const nameInput = element('input', 'text-input');
+        Object.assign(nameInput, { type: 'text', maxLength: 80, value: mappingsDraft.knownConsumerNames?.[id] ?? '', placeholder: id });
+        nameInput.setAttribute('aria-label', `Eigen naam voor ${id}`);
+        nameInput.addEventListener('input', () => {
+          mappingsDraft.knownConsumerNames ??= {};
+          if (nameInput.value.trim()) mappingsDraft.knownConsumerNames[id] = nameInput.value;
+          else delete mappingsDraft.knownConsumerNames[id];
+        });
+        nameLabel.append(nameInput);
+        row.append(label, nameLabel);
+        choices.append(row);
       }
       if (!choices.childElementCount) choices.append(element('p', 'muted', 'Geen passende apparaatmetingen gevonden.'));
       section.append(choices);
@@ -1050,6 +1202,18 @@ function preferences() {
   profileLabel.append(profileSelect);
   profileSection.append(profileLabel, advice);
   form.append(profileSection);
+  const utilitySection = element('section', 'preference-section');
+  utilitySection.append(element('h2', '', 'Verbruiksmeters'), element('p', 'subtitle', 'Toon optionele gas- en watermeters op het overzicht.'));
+  for (const [key, title] of [['showGas', 'Gasverbruik tonen'], ['showWater', 'Waterverbruik tonen']]) {
+    const label = element('label', 'checkbox-field');
+    const input = element('input');
+    input.type = 'checkbox';
+    input.checked = Boolean(preferencesDraft[key]);
+    input.addEventListener('change', () => { preferencesDraft[key] = input.checked; });
+    label.append(input, element('span', '', title));
+    utilitySection.append(label);
+  }
+  form.append(utilitySection);
   const sections = [
     ['Warmte & aanwezigheid', [['comfortC', 'Comforttemperatuur', '°C', 16, 24, 0.5], ['awayC', 'Temperatuur bij afwezigheid', '°C', 12, 24, 0.5], ['occupiedFrom', 'Aanwezig vanaf', 'uur', 0, 23, 1], ['occupiedUntil', 'Aanwezig tot', 'uur', 1, 24, 1]]],
     ['Stroom & laden', [['gridLimitKw', 'Maximale netafname', 'kW', 1, 25, 0.1], ['evEnergyKwh', 'Gewenste laadenergie', 'kWh', 0, 100, 1], ['deadlineHours', 'Laden gereed binnen', 'uur', 1, 24, 1]]]
@@ -1105,11 +1269,156 @@ function preferences() {
   main.append(form);
 }
 
+async function drawUtilityCharts(utility, status, entityId, reload = false) {
+  try {
+    const cacheKey = `${utility}:${entityId}`;
+    let cached = utilityHistoryCache[cacheKey];
+    if (reload || !cached || Date.now() - cached.fetchedAt > 300000) {
+      cached = { ...(await api(`utility-history/${utility}`)), fetchedAt: Date.now() };
+      utilityHistoryCache[cacheKey] = cached;
+    }
+    const result = cached;
+    if (!document.body.contains(status)) return;
+    status.textContent = result.available ? '' : 'Nog onvoldoende meterhistorie beschikbaar.';
+    if (!result.available) return;
+    const styles = getComputedStyle(document.documentElement);
+    const color = styles.getPropertyValue('--green').trim();
+    const muted = styles.getPropertyValue('--muted').trim();
+    const line = styles.getPropertyValue('--line').trim();
+    for (const [key, title, interval] of [
+      ['hours24', 'Laatste 24 uur · per uur', 60 * 60 * 1000],
+      ['days7', 'Afgelopen week · per dag', 24 * 60 * 60 * 1000],
+      ['days30', 'Afgelopen 30 dagen · per dag', 24 * 60 * 60 * 1000]
+    ]) {
+      const canvas = status.parentElement.querySelector(`[data-utility-chart="${key}"]`);
+      if (!canvas) continue;
+      const formatter = new Intl.DateTimeFormat('nl-NL', interval === 60 * 60 * 1000
+        ? { timeZone: 'Europe/Amsterdam', hour: '2-digit', minute: '2-digit' }
+        : { timeZone: 'Europe/Amsterdam', day: '2-digit', month: '2-digit' });
+      utilityCharts.push({ utility, chart: new Chart(canvas, {
+        type: 'line',
+        data: {
+          labels: result.series[key].map(bucket => formatter.format(new Date(bucket.timestamp))),
+          datasets: [{ label: `${utility === 'gas' ? 'Gas' : 'Water'}verbruik`, data: result.series[key].map(bucket => bucket.value), borderColor: color,
+            backgroundColor: `${color}24`, borderWidth: 2, pointRadius: key === 'hours24' ? 2 : 1.5,
+            pointHoverRadius: 5, tension: 0.25, fill: true }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false, interaction: { intersect: false, mode: 'index' },
+          plugins: { legend: { display: false }, tooltip: { callbacks: { label: context => `${number(context.parsed.y)} m³` } } },
+          scales: {
+            x: { grid: { display: false }, ticks: { color: muted, maxTicksLimit: key === 'hours24' ? 8 : 10, maxRotation: 0 } },
+            y: { beginAtZero: true, grid: { color: line }, ticks: { color: muted }, title: { display: true, text: 'm³', color: muted } }
+          },
+          animation: { duration: 250 }
+        }
+      }) });
+    }
+  } catch (error) {
+    if (document.body.contains(status)) status.textContent = error.message;
+  }
+}
+
+function utilityPanel(utility) {
+  const isGas = utility === 'gas';
+  const label = isGas ? 'Gas' : 'Water';
+  const role = isGas ? 'gasConsumption' : 'waterConsumption';
+  const entityId = data.mappings[role];
+  const reading = data.readings.find(item => item.role === role);
+  const section = element('section', 'utility-panel');
+  const header = element('div', 'section-heading');
+  header.append(element('h2', '', `${label}verbruik`));
+  if (entityId) {
+    const reload = toolButton('refresh-cw', `${label}historie vernieuwen`, () => {
+      const status = section.querySelector('.utility-history-status');
+      for (const item of utilityCharts.filter(item => item.utility === utility)) item.chart.destroy();
+      utilityCharts = utilityCharts.filter(item => item.utility !== utility);
+      section.querySelectorAll('.utility-chart canvas').forEach(canvas => {
+        const replacement = document.createElement('canvas');
+        replacement.dataset.utilityChart = canvas.dataset.utilityChart;
+        replacement.dataset.utility = utility;
+        replacement.setAttribute('role', 'img');
+        replacement.setAttribute('aria-label', canvas.getAttribute('aria-label'));
+        canvas.replaceWith(replacement);
+      });
+      status.textContent = 'Historie vernieuwen…';
+      drawUtilityCharts(utility, status, entityId, true);
+    });
+    header.append(reload);
+  }
+  section.append(header);
+  if (!entityId) {
+    const copy = element('p', 'empty-state', `Koppel een cumulatieve ${label.toLowerCase()}meter in Koppelingen.`);
+    const connect = element('button', 'secondary-button', `${label}meter koppelen`);
+    connect.prepend(icon('link'));
+    connect.addEventListener('click', () => navigate('entities'));
+    section.append(copy, connect);
+    main.append(section);
+    return;
+  }
+  const current = element('div', 'utility-current');
+  current.append(element('span', 'muted', 'Totaalstand'), element('strong', '', reading?.valid ? `${number(Number(reading.value))} m³` : 'Niet beschikbaar'), element('small', 'muted', entityId));
+  section.append(current);
+  const status = element('p', 'utility-history-status muted', 'Meterhistorie laden…');
+  status.classList.add(`utility-history-${utility}`);
+  section.append(status);
+  for (const [key, title] of [['hours24', 'Laatste 24 uur · per uur'], ['days7', 'Afgelopen week · per dag'], ['days30', 'Afgelopen 30 dagen · per dag']]) {
+    const chartSection = element('div', 'utility-chart-section');
+    chartSection.append(element('h3', '', title));
+    const wrapper = element('div', 'utility-chart');
+    const canvas = element('canvas');
+    canvas.dataset.utilityChart = key;
+    canvas.dataset.utility = utility;
+    canvas.setAttribute('role', 'img');
+    canvas.setAttribute('aria-label', `${label}verbruik ${title.toLowerCase()}`);
+    wrapper.append(canvas);
+    chartSection.append(wrapper);
+    section.append(chartSection);
+  }
+  main.append(section);
+  drawUtilityCharts(utility, status, entityId);
+}
+
+function deviceDetail(kind) {
+  const definitions = {
+    ev: { title: 'Laadpaal', subtitle: 'Gekoppelde laadpaalmetingen', metrics: [['evPower', 'Laadvermogen', 'car']], filter: row => row.label === 'Laadpaal' },
+    battery: { title: 'Accu', subtitle: 'Thuisbatterijmetingen', metrics: [['batterySoc', 'Laadtoestand', 'battery-charging'], ['batteryHealth', 'Accuhealth', 'activity'], ['batteryPower', 'Batterijvermogen', 'activity']], filter: row => row.label.startsWith('Batterij ') },
+    solar: { title: 'Zonnepanelen', subtitle: 'Productie en dagopbrengst', metrics: [['solar', 'Opwek nu', 'sun']], filter: row => row.label === 'Zonnepanelen' }
+  };
+  const config = definitions[kind];
+  heading(config.title, config.subtitle);
+  const metrics = element('section', 'device-metrics');
+  let count = 0;
+  for (const [role, title, iconName] of config.metrics) {
+    if (!data.mappings[role]) continue;
+    count++;
+    const card = element('div', 'device-metric');
+    const label = element('span', 'metric-label', title);
+    label.prepend(icon(iconName));
+    card.append(label, element('strong', '', measurement(role)));
+    metrics.append(card);
+  }
+  if (metrics.childElementCount) main.append(metrics);
+  const recap = element('section', 'daily-recap-section');
+  const content = element('div', 'daily-recap-content');
+  const reload = toolButton('refresh-cw', `${config.title}dagrecap vernieuwen`, () => loadDailyRecap(content, true, config.filter));
+  recap.append(element('div', 'section-heading', undefined), content);
+  recap.firstChild.append(element('h2', '', 'Vandaag'), reload);
+  content.append(element('p', 'muted', 'Dagtotalen laden…'));
+  main.append(recap);
+  loadDailyRecap(content, false, config.filter);
+  if (!count && !data.control?.rules?.length) {
+    main.prepend(element('p', 'empty-state', 'Koppel eerst een passende entiteit om apparaatmetingen te tonen.'));
+  }
+}
+
 function render() {
   if (!data) return;
+  for (const item of utilityCharts) item.chart.destroy();
+  utilityCharts = [];
   main.replaceChildren();
   main.setAttribute('aria-busy', 'false');
-  ({ overview, thermal, rules: rulesView, entities, preferences })[view]();
+  ({ overview, thermal, rules: rulesView, entities, preferences, ev: () => deviceDetail('ev'), battery: () => deviceDetail('battery'), solar: () => deviceDetail('solar') })[view]();
   createIcons({ icons });
 }
 function navigate(next) {
@@ -1122,6 +1431,43 @@ function navigate(next) {
 }
 document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', () => navigate(button.dataset.view)));
 document.querySelector('#refresh').addEventListener('click', refresh);
+const sidebar = document.querySelector('.sidebar');
+const menuToggle = document.querySelector('#mobile-menu-toggle');
+const menuBackdrop = document.querySelector('#nav-backdrop');
+function closeMobileMenu() {
+  document.body.classList.remove('nav-open');
+  sidebar.classList.remove('is-open');
+  menuToggle.setAttribute('aria-expanded', 'false');
+  menuBackdrop.hidden = true;
+}
+menuToggle.addEventListener('click', () => {
+  const isOpen = sidebar.classList.toggle('is-open');
+  document.body.classList.toggle('nav-open', isOpen);
+  menuToggle.setAttribute('aria-expanded', String(isOpen));
+  menuBackdrop.hidden = !isOpen;
+});
+menuBackdrop.addEventListener('click', closeMobileMenu);
+document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', closeMobileMenu));
+document.addEventListener('keydown', event => { if (event.key === 'Escape') closeMobileMenu(); });
+const themeToggle = document.querySelector('#theme-toggle');
+function applyTheme(theme, persist = false) {
+  const dark = theme === 'dark';
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  themeToggle.setAttribute('aria-label', dark ? 'Lichte modus inschakelen' : 'Donkere modus inschakelen');
+  themeToggle.title = dark ? 'Lichte modus inschakelen' : 'Donkere modus inschakelen';
+  themeToggle.replaceChildren(icon(dark ? 'sun' : 'moon'));
+  document.querySelector('meta[name="theme-color"]').content = dark ? '#151c19' : '#17694d';
+  if (persist) {
+    try { localStorage.setItem('gridnest-theme', dark ? 'dark' : 'light'); } catch {}
+  }
+}
+let savedTheme;
+try { savedTheme = localStorage.getItem('gridnest-theme'); } catch {}
+applyTheme(savedTheme ?? (window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+themeToggle.addEventListener('click', () => {
+  applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark', true);
+  if (view === 'overview') render();
+});
 createIcons({ icons });
 refresh();
 setInterval(refresh, 30000);

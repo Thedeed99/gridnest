@@ -9,8 +9,10 @@ import { demoEntities } from './demo.js';
 import { householdPresence, thermalReadings, validatePresencePreferences, validateThermal } from './thermal.js';
 import { actionTypes, validateRules } from './rules.js';
 import { createRuleRunner } from './rule-runner.js';
+import { demoUtilityHistory, readUtilityHistory } from './gas.js';
+import { dailyEnergyRecap, demoDailyRecap, recapMeters, readDailyRecap } from './daily-recap.js';
 
-export function createApp({ store, entitiesProvider, demo = false, supervisor = false, runner = null }) {
+export function createApp({ store, entitiesProvider, demo = false, supervisor = false, runner = null, utilityHistoryProvider = async () => ({ available: false, series: { hours24: [], days7: [], days30: [] } }), dailyRecapProvider = async () => ({ available: false, complete: false, rows: [] }) }) {
   const app = express();
   app.disable('x-powered-by');
   app.use((request, response, next) => {
@@ -46,6 +48,26 @@ export function createApp({ store, entitiesProvider, demo = false, supervisor = 
       householdPresence: householdPresence(config.preferences, connection.entities),
       energy: energySummary(config.mappings, connection.entities),
       readings: readings(config.mappings, connection.entities), fetchedAt: new Date().toISOString() });
+  });
+  app.get('/api/utility-history/:utility', async (request, response) => {
+    const { utility } = request.params;
+    const config = store.get();
+    const entityId = ({ gas: config.mappings.gasConsumption, water: config.mappings.waterConsumption })[utility];
+    if (!['gas', 'water'].includes(utility)) return response.status(404).json({ error: 'Onbekende meter.' });
+    if (!config.preferences[utility === 'gas' ? 'showGas' : 'showWater']) return response.status(403).json({ error: 'Deze meter is uitgeschakeld in Mijn wensen.' });
+    if (!entityId) return response.status(409).json({ error: `Koppel eerst een cumulatieve ${utility}meter.` });
+    try { return response.json(await utilityHistoryProvider(entityId, utility)); }
+    catch (error) { return response.status(503).json({ error: error.message || 'Metergeschiedenis niet beschikbaar.' }); }
+  });
+  app.get('/api/daily-recap', async (_request, response) => {
+    try {
+      const config = store.get();
+      const recap = await dailyRecapProvider(config.mappings);
+      response.setHeader('Cache-Control', 'no-store');
+      return response.json(recap);
+    } catch (error) {
+      return response.status(503).json({ error: error.message || 'Dagrecap niet beschikbaar.' });
+    }
   });
   app.put('/api/mappings', async (request, response) => {
     const connection = await entitiesProvider();
@@ -134,11 +156,15 @@ export async function startServer(env = process.env) {
   if (store.get().control.mode === 'active') await store.update({ control: { ...store.get().control, mode: 'preview' } });
   if (store.get().thermal.mode === 'active') await store.update({ thermal: { ...store.get().thermal, mode: 'preview' } });
   const entitiesProvider = demo ? async () => ({ connected: false, entities: demoEntities(), message: 'Voorbeeldwoning · geen echte verbinding' }) : () => readEntities(env);
+  const utilityHistoryProvider = demo ? async (_entityId, utility) => demoUtilityHistory(utility) : entityId => readUtilityHistory(env, entityId);
+  const dailyRecapProvider = demo
+    ? async mappings => demoDailyRecap(recapMeters(mappings, demoEntities()))
+    : async mappings => readDailyRecap(env, recapMeters(mappings, (await entitiesProvider()).entities));
   const runner = createRuleRunner({ store, provider: entitiesProvider, demo,
     unitProvider: demo ? async () => '°C' : () => readTemperatureUnit(env),
     activeAllowed: supervisor && controlEnv.CONTROL_ENABLED === 'true' && !demo,
     execute: command => executeRuleCommand(command, controlEnv) });
-  const app = createApp({ store, demo, supervisor, entitiesProvider, runner });
+  const app = createApp({ store, demo, supervisor, entitiesProvider, runner, utilityHistoryProvider, dailyRecapProvider });
   const server = app.listen(8080, env.HOST || (supervisor ? '0.0.0.0' : '127.0.0.1'), () => {
     runner.start();
     const mode = demo ? 'demo' : runner.status().activeAllowed ? 'sturing toegestaan' : 'regels standaard uit';
