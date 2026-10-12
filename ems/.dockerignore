@@ -1,0 +1,9 @@
+node_modules
+data
+.env
+.env.*
+public/app.js
+public/style.css
+public/fonts
+test
+*.log

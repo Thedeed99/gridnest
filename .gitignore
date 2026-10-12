@@ -1,0 +1,11 @@
+node_modules/
+ems/data/
+ems/public/app.js
+ems/public/style.css
+ems/public/fonts/
+.env
+.env.*
+!.env.example
+*.log
+artifacts/
+*-pilot.zip

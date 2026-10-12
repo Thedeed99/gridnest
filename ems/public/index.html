@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="nl">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#17694d">
+    <title>Gridnest</title>
+    <link rel="stylesheet" href="./style.css">
+    <script type="module" src="./app.js"></script>
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <a class="brand" href="./"><span class="brand-icon"><i data-lucide="house-plug"></i></span><span>Gridnest</span></a>
+        <nav aria-label="Hoofdnavigatie">
+          <button type="button" data-view="overview" aria-current="page"><i data-lucide="activity"></i>Overzicht</button>
+          <button type="button" data-view="thermal"><i data-lucide="thermometer"></i>Warmte</button>
+          <button type="button" data-view="rules"><i data-lucide="list-checks"></i>Stroom</button>
+          <button type="button" data-view="entities"><i data-lucide="link"></i>Koppelingen</button>
+          <button type="button" data-view="preferences"><i data-lucide="sliders-horizontal"></i>Mijn wensen</button>
+        </nav>
+        <div class="sidebar-bottom"><span class="status-dot"></span><span>Lokale opslag</span><small id="mode-label">v0.1 · Regels uit</small></div>
+      </aside>
+      <div class="workspace">
+        <header class="topbar"><span id="connection" role="status">Verbinding controleren...</span><button id="refresh" class="icon-button" title="Metingen vernieuwen" aria-label="Metingen vernieuwen"><i data-lucide="refresh-cw"></i></button></header>
+        <main id="main" aria-busy="true"><p>Gegevens ophalen...</p></main>
+        <footer><span id="timestamp"></span><span>Europe/Amsterdam</span></footer>
+      </div>
+    </div>
+    <div id="notice" role="status" class="notice" hidden></div>
+  </body>
+</html>
