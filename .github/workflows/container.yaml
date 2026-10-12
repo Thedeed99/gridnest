@@ -71,7 +71,7 @@ jobs:
         run: |
           docker exec gridnest-smoke-supervisor node -e "(async () => { for (let attempt = 0; attempt < 15; attempt++) { try { const response = await fetch('http://127.0.0.1:8080/health'); if (response.status !== 403) process.exit(1); process.exit(0); } catch {} await new Promise(resolve => setTimeout(resolve, 1000)); } process.exit(1); })()"
           docker exec gridnest-smoke-supervisor sh -c "grep -Eq '^Uid:[[:space:]]+1000' /proc/1/status"
-          timeout 10s sh -c 'docker logs --follow gridnest-smoke-supervisor 2>&1 | grep -m 1 -F "sturing toegestaan"'
+          timeout 10s sh -c 'until docker logs gridnest-smoke-supervisor 2>&1 | grep -Fq "sturing toegestaan"; do sleep 1; done'
       - name: Container logs and cleanup
         if: always()
         run: |
