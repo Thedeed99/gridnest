@@ -17,6 +17,7 @@ export function createApp({ store, entitiesProvider, demo = false, supervisor = 
   utilityHistoryProvider = async () => ({ available: false, series: { hours24: [], days7: [], days30: [] } }),
   dailyRecapProvider = async () => ({ available: false, complete: false, rows: [] }),
   batterySwitchProvider = async () => { throw new Error('Accubediening niet beschikbaar.'); },
+  evCommandProvider = async () => { throw new Error('Laadpaalbediening niet beschikbaar.'); },
   solarLimitProvider = async () => { throw new Error('Omvormerbediening niet beschikbaar.'); } }) {
   const app = express();
   app.disable('x-powered-by');
@@ -90,6 +91,48 @@ export function createApp({ store, entitiesProvider, demo = false, supervisor = 
       return response.json({ entityId, enabled: body.data.enabled });
     } catch (error) {
       return response.status(503).json({ error: error.message || 'Accubediening mislukt.' });
+    }
+  });
+  app.post('/api/ev/control', async (request, response) => {
+    const body = z.discriminatedUnion('action', [
+      z.object({ action: z.literal('enable'), enabled: z.boolean(), confirm: z.literal(true) }).strict(),
+      z.object({ action: z.literal('current'), value: z.number().finite().min(6).max(32), confirm: z.literal(true) }).strict(),
+      z.object({ action: z.literal('lock'), locked: z.boolean(), confirm: z.literal(true) }).strict()
+    ]).safeParse(request.body);
+    if (!body.success) return response.status(400).json({ error: 'Bevestig een geldige laadpaalopdracht.' });
+    const snapshot = store.get();
+    if (!supervisor || demo || !runner?.status().activeAllowed || snapshot.control.mode !== 'active') return response.status(403).json({ error: 'Laadpaalbediening vereist vrijgave en de stand Actief.' });
+    const role = { enable: 'evEnable', current: 'evCurrentLimit', lock: 'evLockStatus' }[body.data.action];
+    const entityId = snapshot.mappings[role];
+    if (!entityId) return response.status(409).json({ error: 'Koppel eerst de bijbehorende laadpaalbediening.' });
+    try {
+      const connection = await entitiesProvider();
+      const actuator = connection.entities.find(entity => entity.id === entityId);
+      if (!connection.connected || !isFresh(actuator, Date.now(), snapshot.control.maxAgeSeconds)) return response.status(409).json({ error: 'Laadpaalbediening ontbreekt of is niet recent.' });
+      let command;
+      if (body.data.action === 'current') {
+        const { value } = body.data;
+        if (actuator.domain !== 'number' || actuator.unit !== 'A' || !Number.isFinite(actuator.minimum) || !Number.isFinite(actuator.maximum) ||
+          !Number.isFinite(actuator.step) || actuator.step <= 0 || value < actuator.minimum || value > actuator.maximum ||
+          Math.abs((value - actuator.minimum) / actuator.step - Math.round((value - actuator.minimum) / actuator.step)) > 0.000001) return response.status(409).json({ error: 'Deze laadstroom wordt niet ondersteund.' });
+        command = { entityId, service: 'number.set_value', value };
+      } else if (body.data.action === 'enable') {
+        if (actuator.domain !== 'switch' || !['on', 'off'].includes(actuator.state)) return response.status(409).json({ error: 'Ongeldige laadschakelaar.' });
+        if (body.data.enabled) {
+          const cable = connection.entities.find(entity => entity.id === snapshot.mappings.evCableStatus);
+          if (!isFresh(cable, Date.now(), snapshot.control.maxAgeSeconds) || cable.state !== 'on') return response.status(409).json({ error: 'Starten vereist een aangesloten kabel met recente status.' });
+        }
+        command = { entityId, service: `switch.turn_${body.data.enabled ? 'on' : 'off'}` };
+      } else {
+        if (actuator.domain !== 'lock' || !['locked', 'unlocked'].includes(actuator.state)) return response.status(409).json({ error: 'Ongeldige kabelvergrendeling.' });
+        const power = connection.entities.find(entity => entity.id === snapshot.mappings.evPower);
+        if (!body.data.locked && (!isFresh(power, Date.now(), snapshot.control.maxAgeSeconds) || !['W', 'kW'].includes(power.unit) || !Number.isFinite(Number(power.state)) || Number(power.state) !== 0)) return response.status(409).json({ error: 'Stop eerst het laden; ontgrendelen vereist recent gemeten nulvermogen.' });
+        command = { entityId, service: `lock.${body.data.locked ? 'lock' : 'unlock'}` };
+      }
+      await evCommandProvider(command);
+      return response.json(command);
+    } catch (error) {
+      return response.status(503).json({ error: error.message || 'Laadpaalbediening mislukt.' });
     }
   });
   app.post('/api/solar/limit', async (request, response) => {
@@ -206,11 +249,12 @@ export async function startServer(env = process.env) {
     : async mappings => readDailyRecap(env, recapMeters(mappings, (await entitiesProvider()).entities));
   const batterySwitchProvider = (entityId, enabled) => executeRuleCommand({ entityId, service: `switch.turn_${enabled ? 'on' : 'off'}` }, controlEnv);
   const solarLimitProvider = (entityId, value) => executeRuleCommand({ entityId, service: 'number.set_value', value }, controlEnv);
+  const evCommandProvider = command => executeRuleCommand(command, controlEnv);
   const runner = createRuleRunner({ store, provider: entitiesProvider, demo,
     unitProvider: demo ? async () => '°C' : () => readTemperatureUnit(env),
     activeAllowed: supervisor && controlEnv.CONTROL_ENABLED === 'true' && !demo,
     execute: command => executeRuleCommand(command, controlEnv) });
-  const app = createApp({ store, demo, supervisor, entitiesProvider, runner, utilityHistoryProvider, dailyRecapProvider, batterySwitchProvider, solarLimitProvider });
+  const app = createApp({ store, demo, supervisor, entitiesProvider, runner, utilityHistoryProvider, dailyRecapProvider, batterySwitchProvider, solarLimitProvider, evCommandProvider });
   const server = app.listen(8080, env.HOST || (supervisor ? '0.0.0.0' : '127.0.0.1'), () => {
     runner.start();
     const mode = demo ? 'demo' : runner.status().activeAllowed ? 'sturing toegestaan' : 'regels standaard uit';

@@ -250,6 +250,52 @@ footer { display: flex; justify-content: space-between; gap: 12px; font-size: 10
 .daily-recap-row { display: flex; justify-content: space-between; gap: 20px; border-top: 1px solid var(--line); padding: 12px 0; font-size: 12px; }
 .daily-recap-row strong { flex-shrink: 0; }
 .unit-toggle { width: 44px; font-size: 11px; font-weight: 800; }
+.mapping-group { padding: 24px 0 8px; border-top: 1px solid var(--line); }
+.mapping-group h2 { font-size: 16px; margin: 0 0 8px; }
+.appliance-panel { width: 100%; min-width: 0; background: #1e4036; color: #f5faf7; border-radius: 8px; overflow: hidden; padding: 20px 16px 0; margin-bottom: 24px; }
+.appliance-header { display: flex; align-items: center; gap: 12px; }
+.appliance-header > svg { width: 22px; height: 22px; flex-shrink: 0; }
+.appliance-header h2 { font-size: 15px; margin: 0 0 3px; color: inherit; }
+.appliance-status { font-size: 11px; color: #bbcfc8; }
+.appliance-visual { height: 150px; display: grid; place-items: center; }
+.appliance-housing { position: relative; width: 76px; height: 116px; padding: 10px; border: 5px solid #303535; border-radius: 18px; background: #191d1e; }
+.appliance-face { position: relative; height: 70px; border-radius: 8px; background: #0c1011; overflow: hidden; }
+.charger-indicator { height: 4px; width: 36px; margin: 10px auto; background: #262c2d; border-radius: 2px; }
+.charger-socket { width: 13px; height: 13px; border: 4px solid #737a7b; border-radius: 50%; margin: 8px auto 0; }
+.battery-visual .appliance-housing { width: 64px; height: 112px; padding: 5px; border-radius: 12px; }
+.battery-visual .appliance-housing::before { content: ''; position: absolute; width: 20px; height: 8px; top: -12px; left: 17px; background: #303535; border-radius: 3px 3px 0 0; }
+.battery-visual .appliance-face { height: 100%; border-radius: 4px; }
+.battery-fill { position: absolute; inset: auto 0 0; background: #6b7275; transition: height 200ms ease; }
+.battery-charge { display: block; text-align: center; font-size: 28px; margin: 0 0 16px; }
+.charger-lock-control { display: grid; justify-items: center; gap: 6px; margin: 0 0 16px; font-size: 10px; color: #bbcfc8; }
+.charger-lock-control button { width: 44px; height: 44px; border-radius: 50%; border: 1px solid #78958b; color: #f5faf7; background: transparent; }
+:root .appliance-panel .primary-button { background: #efd044; color: #10251d; border-color: #efd044; border-radius: 24px; justify-content: center; min-height: 40px; width: 100%; }
+:root .appliance-panel .primary-button:hover { background: #f7dc61; }
+.charger-panel > .appliance-command { width: 60%; min-width: 180px; display: flex; margin: 0 auto 16px; }
+.appliance-panel button:disabled { opacity: .55; cursor: not-allowed; }
+:root .appliance-panel .secondary-button { color: #f5faf7; background: transparent; border-color: #78958b; margin-bottom: 16px; }
+.charger-limit-control { display: grid; grid-template-columns: 1fr auto; gap: 6px; font-size: 11px; color: #bbcfc8; margin: 0 0 16px; }
+.charger-limit-control input { grid-column: 1 / -1; width: 100%; accent-color: #efd044; min-height: 24px; }
+.appliance-measurements { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); background: #ffffff08; }
+.appliance-measurement { min-width: 0; padding: 12px 10px; display: grid; gap: 6px; border-bottom: 1px solid #ffffff12; }
+.appliance-measurement > span { font-size: 10px; color: #bbcfc8; }
+.appliance-measurement > strong { font-size: 14px; overflow-wrap: anywhere; }
+.battery-panel .appliance-measurement { text-align: center; }
+.charger-phase-heading { font-size: 10px; font-weight: 600; color: #bbcfc8; margin: 16px 0 8px; }
+.charger-phases { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-bottom: 16px; background: #ffffff08; }
+.charger-phases .appliance-measurement { padding: 8px; grid-template-columns: 1fr auto; gap: 6px 2px; }
+.charger-phases .appliance-measurement > strong { font-size: 11px; }
+.charger-phases meter { grid-column: 1 / -1; width: 100%; height: 6px; }
+.charger-phases meter::-webkit-meter-bar { background: #547268; border: 0; }
+.charger-phases meter::-webkit-meter-optimum-value { background: #efd044; }
+.charger-phases meter::-moz-meter-bar { background: #efd044; }
+.appliance-footer { display: flex; align-items: center; gap: 8px; margin: 0 -16px; padding: 12px 16px; font-size: 11px; background: #ffffff08; }
+.appliance-footer svg { width: 16px; height: 16px; flex-shrink: 0; }
+.appliance-control-note { font-size: 11px; color: #bbcfc8; padding: 12px 0; margin: 0; }
+.battery-panel .battery-control-section { border: 0; padding: 0; margin: 0 0 12px; }
+.battery-panel .battery-control-section > h2, .battery-panel .battery-control-section > .room-status { display: none; }
+.battery-panel .battery-control-section > .primary-button { margin-top: 0; }
+.battery-panel .battery-control-section > .muted, .battery-panel .subtitle { color: #bbcfc8; }
 .device-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 8px 0 24px; }
 .device-metric { display: grid; gap: 10px; align-content: start; min-width: 0; min-height: 92px; padding: 14px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
 .device-metric .metric-label { font-size: 11px; }
@@ -273,8 +319,8 @@ footer { display: flex; justify-content: space-between; gap: 12px; font-size: 10
 .phase-loads h3 { font-size: 13px; margin: 0 0 12px; }
 .phase-load-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .phase-load-row { display: grid; grid-template-rows: auto auto 1fr; gap: 5px; min-width: 0; border: 1px solid var(--line); border-radius: 6px; padding: 10px; background: var(--surface); }
-.phase-load-row > strong { color: var(--green); font-size: 11px; }
-.phase-load-primary { display: block; font-size: 17px; font-weight: 800; line-height: 1.25; }
+.phase-load-row > strong { color: var(--green); font-size: 11px; text-align: center; }
+.phase-load-primary { display: block; font-size: 17px; font-weight: 800; line-height: 1.25; text-align: center; }
 .phase-load-values { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: center; gap: 6px; margin-top: 2px; font-size: 10px; }
 .phase-load-reading { display: grid; gap: 2px; min-width: 0; }
 .phase-load-reading { display: block; color: var(--muted); font-size: 9px; white-space: nowrap; }

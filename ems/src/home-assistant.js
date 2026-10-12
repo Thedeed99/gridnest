@@ -9,6 +9,8 @@ export const roles = [
   { id: 'temperature', name: 'Kamertemperatuur', domain: 'sensor', units: ['°C'], icon: 'thermometer', description: 'De temperatuur in de belangrijkste verblijfsruimte.' },
   { id: 'climate', name: 'Verwarming', domain: 'climate', units: [], icon: 'heater', description: 'Thermostaat of warmtepomp. In deze versie alleen uitlezen.' },
   { id: 'evPower', name: 'Laadpaal', domain: 'sensor', units: ['W', 'kW'], icon: 'car', description: 'Actueel laadvermogen; geen start- of stopopdracht.' },
+  { id: 'evEnable', name: 'Laadpaal · Laden toestaan', domain: 'switch', units: [], icon: 'car', description: 'Schakelaar om laden te starten of te stoppen.' },
+  { id: 'evCurrentLimit', name: 'Laadpaal · Stroomlimiet', domain: 'number', units: ['A'], icon: 'activity', description: 'Instelbare laadstroomlimiet in ampere.' },
   { id: 'evCableStatus', name: 'Laadpaal · Kabelstatus', domain: 'binary_sensor', units: [], icon: 'plug', description: 'Status van de laadkabel.' },
   { id: 'evLockStatus', name: 'Laadpaal · Vergrendeling', domain: 'lock', units: [], icon: 'lock', description: 'Vergrendelstatus van de laadkabel.' },
   { id: 'evSessionEnergy', name: 'Laadpaal · Sessieverbruik', domain: 'sensor', units: ['Wh', 'kWh'], icon: 'activity', description: 'Energie geleverd tijdens de huidige laadsessie.' },
@@ -150,7 +152,8 @@ export async function executeRuleCommand(command, env = process.env, request = f
   if (!env.SUPERVISOR_TOKEN || env.CONTROL_ENABLED !== 'true') throw new Error('Live sturing is niet vrijgegeven.');
   const allowed = {
     'climate.set_temperature': ['climate', 'temperature'], 'climate.set_hvac_mode': ['climate', 'hvac_mode'],
-    'number.set_value': ['number', 'value'], 'switch.turn_on': ['switch', null], 'switch.turn_off': ['switch', null]
+    'number.set_value': ['number', 'value'], 'switch.turn_on': ['switch', null], 'switch.turn_off': ['switch', null],
+    'lock.lock': ['lock', null], 'lock.unlock': ['lock', null]
   };
   const action = allowed[command.service];
   if (!action || !new RegExp(`^${action[0]}\\.[a-z0-9_]+$`).test(command.entityId)) throw new Error('Opdracht niet toegestaan.');

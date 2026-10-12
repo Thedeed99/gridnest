@@ -50,7 +50,17 @@ Selecteer geen groepmeter samen met de onderliggende apparaten. Gridnest kan een
 
 Home Assistant ondersteunt koppelingen met veel merken; Gridnest gebruikt die entiteiten, niet eigen fabrikantaccounts. Niet ieder apparaat heeft een veilige bedieningsentiteit. Een koppeling is daarom nog geen bewijs dat het apparaat automatisch kan worden gestuurd.
 
+## Apparaatpagina's
+
+Laadpaal en Accu tonen een centraal apparaatbeeld, bedieningsknoppen en compacte metingen in een paneel dat meegroeit met de pagina. Ontbrekende metingen blijven herkenbaar als niet beschikbaar. De fasebalkjes bij Laadpaal tonen gemeten laadstroom, niet de resterende capaciteit van de aansluiting.
+
+Koppel bij Laadpaal optioneel een laadschakelaar (`switch`), stroomlimiet (`number` in A) en kabelslot (`lock`). Starten vereist een recent aangesloten kabel; de stroomlimiet is begrensd op 6–32 A en het bereik en de stap van de entiteit. Ontgrendelen vereist recent gemeten nulvermogen. Iedere laadpaalopdracht vraagt bevestiging en vereist apparaatvrijgave plus Stroom in Actief. Actieve regels kunnen handmatige waarden later overschrijven.
+
+Bij Zonnepanelen staat Opwek vandaag naast de verwachte dagopbrengst. De werkelijke opbrengst wordt uit de vermogenshistorie geschat; onvolledige historie blijft gemarkeerd. De productielimietslider wordt bij loslaten toegepast na toestemming voor de huidige browsersessie en gekoppelde entiteit. Na herladen of een mislukte opdracht is opnieuw toestemming nodig. Vrijgave, Actief en recente geldige telemetrie blijven verplicht.
+
 ## Mijn wensen
+
+Onder **Metingen verversen** kies je 5, 10, 30 of 60 seconden, of alleen handmatig. De standaard is 10 seconden. Sla de wensen op om het interval te bewaren. De vernieuwknop blijft beschikbaar; het gekozen interval geldt voor het ophalen van metingen, niet voor de regelcyclus. Automatisch verversen wacht bij een verborgen pagina, open dialoog of actieve slider.
 
 Stel comforttemperatuur, afwezigtemperatuur, dagelijkse aanwezigheid, maximaal netvermogen, gewenste laadenergie en een laadtermijn in. Tijden zijn Nederlandse lokale uren en ondersteunen in deze eerste versie een periode binnen dezelfde dag. Nieuwe kamers beginnen op de comforttemperatuur; de afwezigtemperatuur kan via de optionele kamerregeling worden toegepast. Overige wensen vormen niet vanzelf stroomregels of roosters. Een kW-limiet is geen vervanging voor beveiliging van afzonderlijke fasen.
 

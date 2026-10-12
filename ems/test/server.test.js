@@ -322,6 +322,18 @@ test('kamer-aanwezigheid accepteert en leest een person-entiteit', () => {
   assert.equal(room.occupied, true);
 });
 
+test('verversingsinterval wordt opgeslagen en ongeldige intervallen worden geweigerd', async context => {
+  const { url, store } = await fixture(context);
+  const send = refreshSeconds => fetch(`${url}/api/preferences`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...store.get().preferences, refreshSeconds }) });
+  for (const seconds of [5, 10, 30, 60, 0]) {
+    assert.equal((await send(seconds)).status, 200);
+    const bootstrap = await (await fetch(`${url}/api/bootstrap`)).json();
+    assert.equal(bootstrap.preferences.refreshSeconds, seconds);
+  }
+  assert.equal((await send(15)).status, 400);
+  assert.equal(store.get().preferences.refreshSeconds, 0);
+});
+
 test('handmatige accubediening vereist Supervisor-vrijgave en expliciete bevestiging', async context => {
   let command;
   const { url, store } = await fixture(context, {
@@ -338,6 +350,36 @@ test('handmatige accubediening vereist Supervisor-vrijgave en expliciete bevesti
   assert.deepEqual(command, { entityId: 'switch.demo_battery_enable', enabled: true });
   const unconfirmed = await fetch(`${url}/api/battery/enable`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: false }) });
   assert.equal(unconfirmed.status, 400);
+});
+
+test('laadpaalbediening bewaakt vrijgave, kabel, stroomlimiet en ontgrendelen', async context => {
+  const commands = [];
+  let entities = demoEntities();
+  const { url, store } = await fixture(context, {
+    demo: false, supervisor: true, isIngressRequest: () => true,
+    entitiesProvider: async () => ({ connected: true, entities }),
+    runner: { status: () => ({ activeAllowed: true }) },
+    evCommandProvider: async command => { commands.push(command); }
+  });
+  const send = body => fetch(`${url}/api/ev/control`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const mappings = { ...emptyMappings, evEnable: 'switch.demo_ev_enable', evCurrentLimit: 'number.demo_ev_current', evCableStatus: 'binary_sensor.demo_ev_cable', evLockStatus: 'lock.demo_ev_cable', evPower: 'sensor.demo_ev_power' };
+  await store.update({ mappings });
+  assert.equal((await send({ action: 'enable', enabled: true, confirm: true })).status, 403);
+  await store.update({ control: { ...defaultRules, mode: 'active' } });
+  assert.equal((await send({ action: 'enable', enabled: true })).status, 400);
+  assert.equal((await send({ action: 'enable', enabled: true, confirm: true })).status, 200);
+  assert.equal((await send({ action: 'current', value: 12, confirm: true })).status, 200);
+  assert.equal((await send({ action: 'current', value: 17, confirm: true })).status, 409);
+  assert.equal((await send({ action: 'current', value: 6.5, confirm: true })).status, 409);
+  assert.equal((await send({ action: 'lock', locked: false, confirm: true })).status, 409);
+  entities = entities.map(entity => entity.id === 'sensor.demo_ev_power' ? { ...entity, state: '0' } : entity);
+  assert.equal((await send({ action: 'lock', locked: false, confirm: true })).status, 200);
+  entities = entities.map(entity => entity.id === 'binary_sensor.demo_ev_cable' ? { ...entity, state: 'off' } : entity);
+  assert.equal((await send({ action: 'enable', enabled: true, confirm: true })).status, 409);
+  entities = entities.map(entity => ({ ...entity, reportedAt: '2000-01-01T00:00:00Z', updatedAt: '2000-01-01T00:00:00Z' }));
+  assert.equal((await send({ action: 'current', value: 12, confirm: true })).status, 409);
+  assert.equal(commands.length, 3);
+  assert.deepEqual(commands[1], { entityId: 'number.demo_ev_current', service: 'number.set_value', value: 12 });
 });
 
 test('omvormerslider vereist actieve vrijgave, bevestiging en geldige stap', async context => {
