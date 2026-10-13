@@ -1,0 +1,22 @@
+name: Gridnest
+version: "1.0.0"
+slug: gridnest
+description: Lokaal EMS met eigen energie- en verwarmingsregels
+arch:
+  - amd64
+  - aarch64
+startup: application
+boot: auto
+init: false
+stage: stable
+ingress: true
+ingress_port: 8080
+panel_icon: mdi:home-lightning-bolt-outline
+panel_title: Gridnest
+panel_admin: true
+homeassistant_api: true
+apparmor: true
+options:
+  allow_control: false
+schema:
+  allow_control: bool

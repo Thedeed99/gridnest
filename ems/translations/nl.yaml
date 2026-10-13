@@ -1,0 +1,4 @@
+configuration:
+  allow_control:
+    name: Echte apparaatsturing vrijgeven
+    description: Sta actieve regels toe na controle van de apparaten. Regels blijven standaard uit; proefmodus voert geen opdrachten uit.
