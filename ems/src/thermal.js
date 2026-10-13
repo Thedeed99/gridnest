@@ -1,6 +1,6 @@
 import { compatible, roles } from './home-assistant.js';
 import { thermalSchema } from './store.js';
-import { isFresh, planRules } from './rules.js';
+import { planRules } from './rules.js';
 import { solarTarget } from './thermal-solar.js';
 
 export function entityPresence(entity) {
@@ -103,16 +103,10 @@ export function planThermal({ thermal, settings, entities, mappings, temperature
     const room = thermal.rooms.find(room => room.id === source.controlRoomId && room.sourceIds.includes(source.id));
     const entity = entities.find(entity => entity.id === source.entityId);
     const definition = { id: `thermal:${source.id}:temperature`, name: source.name, priority: source.priority ?? 50,
-      enabled: true, confirmed: source.confirmed, conditions: [{ entityId: room?.temperatureEntity ?? '', operator: 'gte', value: -30 }],
+      enabled: true, confirmed: source.confirmed, conditions: [],
       action: { type: 'climate_temperature', entityId: source.entityId, value: room?.targetC ?? 20, otherwise: room?.targetC ?? 20 } };
     const blocked = reason => ({ definition, id: definition.id, name: source.name, sourceId: source.id, origin: 'thermal', priority: definition.priority, status: 'blocked', command: null, reason });
-    if (!room?.temperatureEntity || !source.entityId || source.profile === 'unspecified') { plans.push(blocked('Kies een gekoppelde regelkamer, temperatuursensor, bedieningsentiteit en verwarmingsprofiel.')); continue; }
-    const sensor = entities.find(entity => entity.id === room.temperatureEntity);
-    const validSensor = isFresh(sensor, now, settings.maxAgeSeconds) && (
-      (sensor.domain === 'sensor' && sensor.unit === '°C' && sensor.state.trim() !== '' && Number.isFinite(Number(sensor.state)) && Number(sensor.state) >= -30 && Number(sensor.state) <= 60) ||
-      (sensor.domain === 'climate' && Number.isFinite(sensor.currentTemperature) && sensor.currentTemperature >= -30 && sensor.currentTemperature <= 60)
-    );
-    if (!validSensor) { plans.push(blocked('Kamertemperatuur in Celsius ontbreekt, is ongeldig of niet recent.')); continue; }
+    if (!room || !source.entityId || source.profile === 'unspecified') { plans.push(blocked('Kies een gekoppelde regelkamer, bedieningsentiteit en verwarmingsprofiel.')); continue; }
     if (!entity?.hvacModes?.includes('heat')) { plans.push(blocked('Deze bron bevestigt geen verwarmmodus.')); continue; }
     let baseTarget = room.targetC;
     let occupied = null;

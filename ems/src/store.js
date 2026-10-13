@@ -17,7 +17,7 @@ export const preferencesSchema = z.object({
   showGas: z.boolean().default(false), showWater: z.boolean().default(false),
   showBatteries: z.boolean().default(true),
   confirmSwitches: z.boolean().default(true),
-  refreshSeconds: z.number().int().refine(value => [0, 5, 10, 30, 60].includes(value), { message: 'Kies een geldig verversingsinterval.' }).default(10),
+  refreshSeconds: z.number().int().refine(value => [0, 1, 5, 10, 30, 60].includes(value), { message: 'Kies een geldig verversingsinterval.' }).default(10),
   heatingProfile: z.enum(heatingProfiles.map(profile => profile.id)).default('unspecified'),
   comfortC: z.number().min(16).max(24), awayC: z.number().min(12).max(24),
   occupiedFrom: z.number().int().min(0).max(23), occupiedUntil: z.number().int().min(1).max(24),

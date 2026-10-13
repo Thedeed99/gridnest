@@ -403,7 +403,7 @@ test('kamer-aanwezigheid accepteert en leest een person-entiteit', () => {
 test('verversingsinterval wordt opgeslagen en ongeldige intervallen worden geweigerd', async context => {
   const { url, store } = await fixture(context);
   const send = refreshSeconds => fetch(`${url}/api/preferences`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...store.get().preferences, refreshSeconds }) });
-  for (const seconds of [5, 10, 30, 60, 0]) {
+  for (const seconds of [1, 5, 10, 30, 60, 0]) {
     assert.equal((await send(seconds)).status, 200);
     const bootstrap = await (await fetch(`${url}/api/bootstrap`)).json();
     assert.equal(bootstrap.preferences.refreshSeconds, seconds);

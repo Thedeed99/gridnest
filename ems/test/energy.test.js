@@ -7,10 +7,10 @@ import { defaultPreferences, preferencesSchema } from '../src/store.js';
 test('verversingsinterval is instelbaar en bestaande voorkeuren blijven op tien seconden', () => {
   const { refreshSeconds, ...legacyPreferences } = defaultPreferences;
   assert.equal(preferencesSchema.parse(legacyPreferences).refreshSeconds, 10);
-  for (const seconds of [0, 5, 10, 30, 60]) {
+  for (const seconds of [0, 1, 5, 10, 30, 60]) {
     assert.equal(preferencesSchema.parse({ ...defaultPreferences, refreshSeconds: seconds }).refreshSeconds, seconds);
   }
-  for (const seconds of [-1, 1, 15, 5.5, 120]) {
+  for (const seconds of [-1, 2, 15, 5.5, 120]) {
     assert.throws(() => preferencesSchema.parse({ ...defaultPreferences, refreshSeconds: seconds }));
   }
 });
