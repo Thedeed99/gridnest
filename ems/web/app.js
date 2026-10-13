@@ -2949,11 +2949,9 @@ function solarDayText(row, solarMeter = null) {
   return `${solarEnergyText(value)}${!data.mappings.solarToday && !row.complete ? ' (schatting)' : ''}`;
 }
 
-async function loadSolarChart(panel, reload = false) {
+function updateSolarChart(panel, recap) {
+  if (!panel.isConnected) return;
   const status = panel.querySelector('.solar-chart-status');
-  try {
-    const recap = await dailyHistory(reload);
-    if (!panel.isConnected) return;
     const row = recap.rows.find(item => item.label === 'Zonnepanelen');
     const text = solarDayText(row, recap.solarToday);
     panel.querySelector('.solar-today-total').textContent = text;
@@ -3001,11 +2999,22 @@ async function loadSolarChart(panel, reload = false) {
       }
     });
     utilityCharts.push({ utility: 'solar', chart });
+}
+
+async function loadSolarChart(panel, reload = false) {
+  const mappingsKey = JSON.stringify(data.mappings);
+  const cachedRecap = dailyRecapCache?.mappingsKey === mappingsKey ? dailyRecapCache : null;
+  if (cachedRecap) updateSolarChart(panel, cachedRecap);
+  try {
+    const recap = await dailyHistory(reload);
+    updateSolarChart(panel, recap);
   } catch (error) {
     if (!panel.isConnected) return;
-    panel.querySelector('.solar-today-total').textContent = solarDayText();
-    panel.querySelector('#solar-actual-today').textContent = solarDayText();
-    status.textContent = error.message;
+    if (!cachedRecap) {
+      panel.querySelector('.solar-today-total').textContent = solarDayText();
+      panel.querySelector('#solar-actual-today').textContent = solarDayText();
+      panel.querySelector('.solar-chart-status').textContent = error.message;
+    }
   }
 }
 

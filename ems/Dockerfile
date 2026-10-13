@@ -10,7 +10,7 @@ COPY public/index.html ./public/index.html
 RUN npm run build && npm prune --omit=dev
 
 FROM node:22-alpine
-ARG BUILD_VERSION=1.0.6
+ARG BUILD_VERSION=1.0.7
 LABEL io.hass.name="Gridnest" \
       io.hass.description="Lokale energie- en comfortmonitor" \
       io.hass.version="${BUILD_VERSION}" \
