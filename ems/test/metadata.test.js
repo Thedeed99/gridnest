@@ -15,12 +15,14 @@ test('Gridnest metadata, pakketversie en containerlabel komen overeen', async ()
   assert.equal(config.name, 'Gridnest');
   assert.equal(config.slug, 'gridnest');
   assert.equal(pkg.name, 'gridnest');
-  assert.equal(config.version, '1.0.2');
+  assert.equal(config.version, '1.0.3');
   assert.equal(config.version, pkg.version);
   assert.equal(lock.version, pkg.version);
   assert.equal(lock.packages[''].version, pkg.version);
   assert.ok(dockerfile.includes(`ARG BUILD_VERSION=${config.version}`));
   assert.ok(dockerfile.includes('COPY src/daily-recap.js ./src/daily-recap.js'));
+  assert.ok(dockerfile.includes('COPY src/solar-meter.js ./src/solar-meter.js'));
+  assert.ok(dockerfile.includes('COPY src/energy-statistics.js ./src/energy-statistics.js'));
   assert.deepEqual(config.arch, ['amd64', 'aarch64']);
 });
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.3 - 2026-10-13
+
+- Bedien extra accuschakelaars via hun eigen batterijconfiguratie, zonder koppeling als bekende verbruiker.
+- Gebruik beschikbare actuatoren en aanwezigheidsstatussen zonder freshness-timer; voeg een afwezigheidstemperatuur per kamer toe met Mijn wensen als terugval.
+- Toon zonneproductie in de dagrecap en bereken cumulatieve zonne-energiemeters als dagverschil.
+- Maak laadkabelontgrendeling onafhankelijk van een vermogensmeting; bediening blijft afhankelijk van Home Assistant-vrijgave en een geldige lock-entiteit.
+- Neem de zonne-meterhelpers op in de Docker-buildstage.
+
 ## 1.0.2 - 2026-10-13
 
 - Bereken Zonneopbrengst vandaag ook uit een cumulatieve Wh/kWh-meter, met Home Assistant-tijdzone en controle op ontbrekende beginstanden en tellerresets.
