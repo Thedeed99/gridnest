@@ -143,20 +143,22 @@ test('dagrecap telt een sensor niet dubbel bij een rol en bekende verbruikers', 
   assert.deepEqual(meters.map(meter => meter.label), ['Laadpaal']);
 });
 
-test('zonne-uurwaarden tellen op tot dagopbrengst en verzinnen geen ontbrekende of toekomstige uren', () => {
+test('zonne-halfuurwaarden tellen op tot dagopbrengst en verzinnen geen ontbrekende of toekomstige perioden', () => {
   const meter = { id: 'sensor.solar', label: 'Zonnepanelen', kind: 'production', unit: 'W' };
   const now = new Date(2026, 9, 12, 3);
   const history = [Array.from({ length: 7 }, (_, index) => ({ last_changed: new Date(2026, 9, 12, 1, index * 15).toISOString(), state: index < 4 ? '1000' : '0' }))];
   const row = dailyEnergyRecap(history, [meter], now).rows[0];
-  assert.equal(row.hours.length, 24);
-  assert.equal(row.hours[0].energyKwh, null);
-  assert.equal(row.hours[0].complete, false);
-  assert.equal(row.hours[1].energyKwh, 1);
-  assert.equal(row.hours[1].complete, true);
-  assert.equal(row.hours[2].energyKwh, 0);
-  assert.equal(row.hours[2].complete, true);
-  assert.equal(row.hours[3].energyKwh, null);
-  assert.equal(row.hours.reduce((total, bucket) => total + (bucket.energyKwh ?? 0), 0), row.energyKwh);
+  assert.equal(row.periods.length, 48);
+  assert.equal(row.periods[0].energyKwh, null);
+  assert.equal(row.periods[0].complete, false);
+  assert.equal(row.periods[2].energyKwh, 0.5);
+  assert.equal(row.periods[2].complete, true);
+  assert.equal(row.periods[3].energyKwh, 0.5);
+  assert.equal(row.periods[3].complete, true);
+  assert.equal(row.periods[4].energyKwh, 0);
+  assert.equal(row.periods[4].complete, true);
+  assert.equal(row.periods[6].energyKwh, null);
+  assert.equal(row.periods.reduce((total, bucket) => total + (bucket.energyKwh ?? 0), 0), row.energyKwh);
 });
 
 test('officiele Energie-totalen gaan voor en behouden opt-in voor gas en water', () => {

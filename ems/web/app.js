@@ -36,6 +36,9 @@ let utilityCharts = [];
 const utilityHistoryCache = {};
 const utilityHistoryRequests = {};
 let dailyRecapCache;
+let dailyRecapPanelNode;
+let dailyRecapContentNode;
+let dailyRecapLoadPromise;
 let solarLimitConsentEntity;
 let solarLimitPending = false;
 
@@ -74,6 +77,7 @@ function measurement(role) {
   if (['W', 'kW'].includes(reading.unit)) return powerText(Number(reading.value) / (reading.unit === 'W' ? 1000 : 1));
   if (reading.unit) return `${number(Number(reading.value))} ${reading.unit}`;
   if (role === 'evCableStatus') return reading.value === 'on' ? 'Kabel aangesloten' : reading.value === 'off' ? 'Kabel los' : reading.value;
+  if (role === 'evLockStatus') return ['on', 'locked'].includes(reading.value) ? 'Kabel vergrendeld' : ['off', 'unlocked'].includes(reading.value) ? 'Kabel ontgrendeld' : reading.value;
   if (role === 'batteryEnable') return reading.value === 'on' ? 'Accu actief' : reading.value === 'off' ? 'Stand-by' : reading.value;
   if (role === 'presence') return reading.value === 'on' ? 'Aanwezig' : 'Afwezig';
   const states = { heat: 'Verwarmen', cool: 'Koelen', auto: 'Automatisch', off: 'Uit', on: 'Aan', locked: 'Vergrendeld', unlocked: 'Ontgrendeld', connected: 'Aangesloten', disconnected: 'Losgekoppeld', plugged: 'Aangesloten', unplugged: 'Losgekoppeld' };
@@ -187,7 +191,11 @@ function solarOutlook(parent) {
     const values = element('div', 'solar-outlook-values');
     const expected = element('div', 'solar-outlook-value');
     expected.append(element('span', '', 'Verwacht'), element('strong', '', outlook.expectedTodayKwh === null ? 'Niet beschikbaar' : `${number(outlook.expectedTodayKwh)} kWh`));
-    const actual = element('span', 'solar-actual-today', 'Werkelijk dagtotaal ophalen…');
+    const cachedRecap = dailyRecapCache?.mappingsKey === JSON.stringify(data.mappings) ? dailyRecapCache : null;
+    const cachedSolarRow = cachedRecap?.rows?.find(item => item.label === 'Zonnepanelen');
+    const actual = element('span', 'solar-actual-today', cachedRecap
+      ? solarDayText(cachedSolarRow, cachedRecap.solarToday)
+      : 'Werkelijk dagtotaal ophalen…');
     actual.id = 'solar-actual-today';
     const actualValue = element('div', 'solar-outlook-value');
     actualValue.append(element('span', '', 'Werkelijk'), actual);
@@ -592,19 +600,31 @@ function batteriesOverview() {
 async function dailyHistory(reload = false) {
   const mappingsKey = JSON.stringify(data.mappings);
   if (reload || !dailyRecapCache || dailyRecapCache.mappingsKey !== mappingsKey || Date.now() - dailyRecapCache.fetchedAt > 30000) {
-    dailyRecapCache = { ...await api('daily-recap'), fetchedAt: Date.now(), mappingsKey };
+    const previousRows = dailyRecapCache?.mappingsKey === mappingsKey ? dailyRecapCache.overviewRows : undefined;
+    dailyRecapCache = { ...await api('daily-recap'), fetchedAt: Date.now(), mappingsKey, overviewRows: previousRows };
   }
   return dailyRecapCache;
 }
 
-async function loadDailyRecap(container, reload = false, filter = null) {
+function dailyRecapOverviewKey() {
+  return JSON.stringify({ mappings: data.mappings, showGas: data.preferences.showGas, showWater: data.preferences.showWater });
+}
+
+function loadDailyRecap(container, reload = false, filter = null) {
+  if (filter) return loadDailyRecapData(container, reload, filter);
+  if (dailyRecapLoadPromise) return dailyRecapLoadPromise;
+  const request = loadDailyRecapData(container, reload, filter);
+  dailyRecapLoadPromise = request.finally(() => {
+    if (dailyRecapLoadPromise === trackedRequest) dailyRecapLoadPromise = undefined;
+  });
+  const trackedRequest = dailyRecapLoadPromise;
+  return trackedRequest;
+}
+
+async function loadDailyRecapData(container, reload, filter) {
+  const mappingsKey = JSON.stringify(data.mappings);
   try {
-    let recap;
-    try { recap = await dailyHistory(reload); }
-    catch (error) {
-      if (filter) throw error;
-      recap = { rows: [] };
-    }
+    const recap = await dailyHistory(reload);
     const utilities = {};
     if (!filter) {
       await Promise.all([['gas', 'showGas', 'gasConsumption'], ['water', 'showWater', 'waterConsumption']].map(async ([utility, preference, role]) => {
@@ -613,7 +633,14 @@ async function loadDailyRecap(container, reload = false, filter = null) {
         if (official) { utilities[utility] = official; return; }
         if (!data.mappings[role]) return;
         try { utilities[utility] = (await utilityHistoryData(utility, data.mappings[role], reload)).today ?? { value: null, complete: false }; }
-        catch { utilities[utility] = { value: null, complete: false }; }
+        catch {
+          const cachedRow = dailyRecapCache?.mappingsKey === mappingsKey
+            ? dailyRecapCache.overviewRows?.find(row => row.label === (utility === 'gas' ? 'Gas' : 'Water'))
+            : null;
+          utilities[utility] = cachedRow
+            ? { value: cachedRow.value, unit: cachedRow.unit, complete: cachedRow.complete, source: cachedRow.source }
+            : { value: null, complete: false };
+        }
       }));
     }
     if (!document.body.contains(container)) return;
@@ -626,35 +653,69 @@ async function loadDailyRecap(container, reload = false, filter = null) {
     }
     const rows = filter ? recap.rows.filter(row => filter(row)).map(row => ({ label: row.label, value: row.energyKwh, unit: 'kWh', complete: row.complete }))
       : dailyOverviewRows({ ...recap, dailySolarTodayKwh: data.energy?.solarOutlook?.actualTodayKwh }, data.mappings, utilities);
-    if (!rows.length) {
-      container.append(element('p', 'empty-state', 'Koppel passende meters om dagtotalen te tonen.'));
-      return;
+    if (!filter && dailyRecapCache?.mappingsKey === mappingsKey) {
+      dailyRecapCache.overviewRows = rows;
+      dailyRecapCache.overviewRowsKey = dailyRecapOverviewKey();
+      dailyRecapCache.overviewRowsFetchedAt = Date.now();
     }
-    if (rows.some(row => row.value !== null && !row.complete)) container.append(element('p', 'energy-warning', 'Onvolledige schatting: er ontbreken meetpunten of er zitten lange gaten in de metingen.'));
-    const list = element('ul', 'daily-recap-list');
-    for (const row of rows) {
-      const item = element('li', 'daily-recap-row');
-      const value = row.value === null || row.value === undefined ? 'Niet beschikbaar'
-        : `${new Intl.NumberFormat('nl-NL', { maximumFractionDigits: row.unit === 'm³' ? 3 : 2 }).format(row.value)} ${row.unit}${row.source === 'home-assistant' ? '' : ' (schatting)'}`;
-      item.append(element('span', '', row.label), element('strong', '', value));
-      list.append(item);
-    }
-    container.append(list);
-    if (!filter && recap.source === 'home-assistant' && recap.updatedThrough) container.append(element('p', 'muted', `Energie bijgewerkt t/m ${formatTime(recap.updatedThrough)}`));
+    renderDailyRecapRows(container, rows, recap, !filter);
   } catch (error) {
     const solarActual = document.querySelector('#solar-actual-today');
-    if (solarActual) solarActual.textContent = solarDayText();
-    if (document.body.contains(container)) container.replaceChildren(element('p', 'energy-warning', error.message));
+    const hasMatchingCache = dailyRecapCache?.mappingsKey === JSON.stringify(data.mappings);
+    if (solarActual && !hasMatchingCache) solarActual.textContent = solarDayText();
+    if (document.body.contains(container)) {
+      if (container.querySelector('.daily-recap-list')) {
+        let warning = container.querySelector('.daily-recap-refresh-error');
+        if (!warning) {
+          warning = element('p', 'muted daily-recap-refresh-error');
+          container.append(warning);
+        }
+        warning.textContent = `Verversen mislukt: ${error.message}`;
+      } else container.replaceChildren(element('p', 'energy-warning', error.message));
+    }
   }
 }
 
+function renderDailyRecapRows(container, rows, recap, showUpdatedThrough = true) {
+  container.querySelector('.daily-recap-refresh-error')?.remove();
+  const signature = JSON.stringify({ rows, source: recap.source, updatedThrough: recap.updatedThrough, showUpdatedThrough });
+  if (container.dataset.recapSignature === signature) return;
+  container.dataset.recapSignature = signature;
+  container.replaceChildren();
+  if (!rows.length) {
+    container.append(element('p', 'empty-state', 'Koppel passende meters om dagtotalen te tonen.'));
+    return;
+  }
+  if (rows.some(row => row.value !== null && !row.complete)) container.append(element('p', 'energy-warning', 'Onvolledige schatting: er ontbreken meetpunten of er zitten lange gaten in de metingen.'));
+  const list = element('ul', 'daily-recap-list');
+  for (const row of rows) {
+    const item = element('li', 'daily-recap-row');
+    const value = row.value === null || row.value === undefined ? 'Niet beschikbaar'
+      : `${new Intl.NumberFormat('nl-NL', { maximumFractionDigits: row.unit === 'm³' ? 3 : 2 }).format(row.value)} ${row.unit}${row.source === 'home-assistant' ? '' : ' (schatting)'}`;
+    item.append(element('span', '', row.label), element('strong', '', value));
+    list.append(item);
+  }
+  container.append(list);
+  if (showUpdatedThrough && recap.source === 'home-assistant' && recap.updatedThrough) container.append(element('p', 'muted', `Energie bijgewerkt t/m ${formatTime(recap.updatedThrough)}`));
+}
+
 function dailyRecapPanel() {
+  if (dailyRecapPanelNode) {
+    main.append(dailyRecapPanelNode);
+    const cache = dailyRecapCache?.mappingsKey === JSON.stringify(data.mappings) ? dailyRecapCache : null;
+    if (!cache?.overviewRows || cache.overviewRowsKey !== dailyRecapOverviewKey() || Date.now() - (cache.overviewRowsFetchedAt ?? 0) > 30000) loadDailyRecap(dailyRecapContentNode);
+    return;
+  }
   const section = element('section', 'daily-recap-section');
   const header = element('div', 'section-heading');
   header.append(element('h2', '', 'Dagrecap vandaag'), toolButton('refresh-cw', 'Dagrecap vernieuwen', () => loadDailyRecap(content, true)));
   const content = element('div', 'daily-recap-content');
-  content.append(element('p', 'muted', 'Dagtotalen laden…'));
+  const cache = dailyRecapCache?.mappingsKey === JSON.stringify(data.mappings) ? dailyRecapCache : null;
+  if (cache?.overviewRows) renderDailyRecapRows(content, cache.overviewRows, cache);
+  else content.append(element('p', 'muted', 'Dagtotalen laden…'));
   section.append(header, content);
+  dailyRecapPanelNode = section;
+  dailyRecapContentNode = content;
   main.append(section);
   loadDailyRecap(content);
 }
@@ -1996,7 +2057,7 @@ function preferences() {
   refreshLabel.append(element('span', '', 'Verversingsinterval'));
   const refreshSelect = element('select');
   refreshSelect.id = 'pref-refreshSeconds';
-  for (const [seconds, title] of [[5, 'Elke 5 seconden'], [10, 'Elke 10 seconden'], [30, 'Elke 30 seconden'], [60, 'Elke 60 seconden'], [0, 'Alleen handmatig']]) {
+  for (const [seconds, title] of [[1, 'Elke seconde'], [5, 'Elke 5 seconden'], [10, 'Elke 10 seconden'], [30, 'Elke 30 seconden'], [60, 'Elke 60 seconden'], [0, 'Alleen handmatig']]) {
     const option = element('option', '', title);
     option.value = seconds;
     refreshSelect.append(option);
@@ -2066,7 +2127,7 @@ async function utilityHistoryData(utility, entityId, reload = false) {
   const cached = utilityHistoryCache[key];
   if (!reload && cached && Date.now() - cached.fetchedAt <= 30000) return cached;
   if (!utilityHistoryRequests[key]) {
-    utilityHistoryRequests[key] = api(`utility-history/${utility}`).then(result => {
+    utilityHistoryRequests[key] = api(`utility-history/${utility}`, reload ? { cache: 'no-store' } : {}).then(result => {
       utilityHistoryCache[key] = { ...result, fetchedAt: Date.now() };
       return utilityHistoryCache[key];
     }).finally(() => { delete utilityHistoryRequests[key]; });
@@ -2197,10 +2258,17 @@ function singleBatteryPanel(batConfig) {
   const outputEntity = data.entities.find(e => e.id === batConfig.outputEntity);
   const remainingEntity = data.entities.find(e => e.id === batConfig.remainingEntity);
   const healthEntity = data.entities.find(e => e.id === batConfig.healthEntity);
+  const usesBatterySpecificSwitch = !batConfig.isMain;
+  const actualSwitchEntity = usesBatterySpecificSwitch
+    ? switchEntity
+    : data.entities.find(e => e.id === data.mappings.batteryEnable) || (data.demo ? switchEntity : null);
 
   const header = element('header', 'appliance-header');
   const copy = element('div');
-  const switchState = batteryInfo(batConfig).label;
+  const switchState = !actualSwitchEntity ? 'Geen schakelaar'
+    : !actualSwitchEntity.available ? 'Niet beschikbaar'
+      : actualSwitchEntity.state === 'on' ? 'Aan'
+        : actualSwitchEntity.state === 'off' ? 'Uit' : 'Onbekend';
   copy.append(element('h2', '', batConfig.name || 'Thuisbatterij'), element('span', 'appliance-status', switchState));
   header.append(icon('battery-charging'), copy);
   panel.append(header);
@@ -2220,62 +2288,44 @@ function singleBatteryPanel(batConfig) {
 
   panel.append(element('strong', 'battery-charge', socVal !== null ? `${number(socVal)} %` : 'Niet beschikbaar'));
 
-  // Activering/schakelaar voor deze specifieke accu (of val terug op hoofdschakelaar batteryEnable)
-  const actualSwitchEntity = switchEntity || data.entities.find(e => e.id === data.mappings.batteryEnable);
   if (actualSwitchEntity) {
     const isEnabled = actualSwitchEntity.state === 'on';
     const section = element('section', 'battery-control-section');
-    const toggle = element('button', 'primary-button', isEnabled ? 'Accu uitschakelen' : 'Accu activeren');
+    const toggle = element('button', 'primary-button', isEnabled ? 'Accu uitschakelen' : 'Accu inschakelen');
     toggle.prepend(icon(isEnabled ? 'pause' : 'play'));
-    toggle.disabled = !data.controlStatus?.activeAllowed || !actualSwitchEntity.available;
-    toggle.addEventListener('click', () => {
+    toggle.disabled = !data.controlStatus?.activeAllowed || !actualSwitchEntity.available || !['on', 'off'].includes(actualSwitchEntity.state);
+    toggle.addEventListener('click', async () => {
       const targetEnabled = !isEnabled;
-      const execute = async () => {
-        try {
-          if (switchEntity) {
-            await api(`batteries/${encodeURIComponent(batConfig.id)}/enable`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ switchId: actualSwitchEntity.id, enabled: targetEnabled, expectedState: actualSwitchEntity.state, confirm: true })
-            });
-          } else {
-            await api('battery/enable', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ enabled: targetEnabled, confirm: true })
-            });
-          }
-          notify(`Accu ${targetEnabled ? 'geactiveerd' : 'uitgeschakeld'}.`);
-          await refresh();
-        } catch (err) { notify(err.message, true); }
-      };
-      if (data.preferences?.confirmSwitches === false) {
-        execute();
-        return;
-      }
-      const dialog = element('dialog', 'thermal-dialog');
-      dialog.setAttribute('aria-label', targetEnabled ? 'Accu activeren' : 'Accu uitschakelen');
-      dialog.append(element('h2', '', targetEnabled ? 'Accu activeren?' : 'Accu uitschakelen?'), element('p', '', `Dit stuurt ${actualSwitchEntity.name} aan.`));
-      const actions = element('div', 'dialog-actions');
-      actions.append(toolButton('x', 'Annuleren', () => dialog.close()));
-      const confirm = element('button', 'primary-button', targetEnabled ? 'Activeren' : 'Uitschakelen');
-      confirm.prepend(icon('check'));
-      confirm.addEventListener('click', async () => {
-        confirm.disabled = true;
-        await execute();
-        dialog.close();
-      });
-      actions.append(confirm);
-      dialog.append(actions);
-      dialog.addEventListener('close', () => dialog.remove());
-      document.body.append(dialog);
-      createIcons({ icons });
-      dialog.showModal();
+      try {
+        if (usesBatterySpecificSwitch) {
+          await api(`batteries/${encodeURIComponent(batConfig.id)}/enable`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ switchId: actualSwitchEntity.id, enabled: targetEnabled, expectedState: actualSwitchEntity.state, confirm: true })
+          });
+        } else {
+          await api('battery/enable', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: targetEnabled, confirm: true })
+          });
+        }
+        notify(`Accu ${targetEnabled ? 'ingeschakeld' : 'uitgeschakeld'}.`);
+        await refresh();
+      } catch (err) { notify(err.message, true); }
     });
     section.append(toggle);
     panel.append(section);
-  } else {
+  } else if (batConfig.isMain) {
     batteryControlPanel(panel);
+  } else {
+    const section = element('section', 'battery-control-section');
+    section.append(element('p', 'subtitle', 'Koppel voor deze accu een eigen schakelaar.'));
+    const connect = element('button', 'secondary-button', 'Accuschakelaar koppelen');
+    connect.prepend(icon('link'));
+    connect.addEventListener('click', () => navigate('entities'));
+    section.append(connect);
+    panel.append(section);
   }
 
   const tiles = element('div', 'appliance-measurements');
@@ -2585,21 +2635,21 @@ async function loadSolarChart(panel, reload = false) {
       previous.chart.destroy();
       utilityCharts = utilityCharts.filter(item => item !== previous);
     }
-    const hours = row?.hours ?? [];
+    const periods = row?.periods ?? [];
     const chart = new Chart(canvas, {
       type: 'bar',
       data: {
-        labels: Array.from({ length: 24 }, (_, hour) => `${String(hour).padStart(2, '0')}:00`),
-        datasets: [{ data: Array.from({ length: 24 }, (_, hour) => hours.find(bucket => bucket.hour === hour)?.energyKwh ?? null), backgroundColor: '#efd044', borderRadius: 3, maxBarThickness: 24 }]
+        labels: Array.from({ length: 48 }, (_, index) => `${String(Math.floor(index / 2)).padStart(2, '0')}:${index % 2 ? '30' : '00'}`),
+        datasets: [{ data: Array.from({ length: 48 }, (_, index) => periods.find(bucket => bucket.index === index)?.energyKwh ?? null), backgroundColor: '#efd044', borderRadius: 3, maxBarThickness: 24 }]
       },
       options: {
         responsive: true, maintainAspectRatio: false, animation: false,
         plugins: {
           legend: { display: false },
-          tooltip: { callbacks: { label: context => `${solarEnergyText(context.parsed.y)}${hours.find(bucket => bucket.hour === context.dataIndex)?.complete ? '' : ' (schatting)'}` } }
+          tooltip: { callbacks: { label: context => `${solarEnergyText(context.parsed.y)}${periods.find(bucket => bucket.index === context.dataIndex)?.complete ? '' : ' (schatting)'}` } }
         },
         scales: {
-          x: { grid: { display: false }, border: { color: '#71897e', dash: [5, 4] }, ticks: { color: '#bbcfc8', maxRotation: 0, autoSkip: false, font: { size: 10 }, callback: (_value, index) => [0, 12, 23].includes(index) ? `${String(index).padStart(2, '0')}:00` : '' } },
+          x: { grid: { display: false }, border: { color: '#71897e', dash: [5, 4] }, ticks: { color: '#bbcfc8', maxRotation: 0, autoSkip: false, font: { size: 10 }, callback: (_value, index) => [0, 12, 24, 36, 47].includes(index) ? `${String(Math.floor(index / 2)).padStart(2, '0')}:${index % 2 ? '30' : '00'}` : '' } },
           y: { beginAtZero: true, display: false }
         }
       }
@@ -2640,7 +2690,7 @@ function deviceDetail(kind) {
     const graph = element('div', 'solar-day-chart');
     const canvas = element('canvas');
     canvas.setAttribute('role', 'img');
-    canvas.setAttribute('aria-label', 'Zonneopbrengst vandaag per uur in kWh');
+    canvas.setAttribute('aria-label', 'Zonneopbrengst vandaag per half uur in kWh');
     graph.append(canvas);
     solarPanel.append(header, today, graph);
   }

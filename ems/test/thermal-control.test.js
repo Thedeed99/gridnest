@@ -104,13 +104,43 @@ test('kamer met climate-entiteit als temperatuursensor kan regelen en verwarmmod
   assert.equal(plans[1].command.value, 'heat'); // schakelt kachel in!
 });
 
-test('monitor-only, onbevestigde bronnen en ontbrekende of oude sensoren sturen niet', () => {
+test('monitor-only en onbevestigde bronnen sturen niet', () => {
   const input = fixture(); input.thermal.sources[0].controlEnabled = false;
   assert.deepEqual(planThermal(input), []);
   input.thermal.sources[0].controlEnabled = true; input.thermal.sources[0].confirmed = false;
   assert.equal(planThermal(input)[0].command, null);
-  input.thermal.sources[0].confirmed = true; input.entities[0].reportedAt = '2026-10-11T00:00:00Z';
-  assert.equal(planThermal(input)[0].command, null);
+});
+
+test('kamerdoel wordt naar Tado gestuurd zonder verse kamertemperatuur', () => {
+  const input = fixture();
+  input.thermal.rooms[0].temperatureEntity = 'climate.cv';
+  input.thermal.rooms[0].targetC = 21;
+  input.entities[1].currentTemperature = null;
+  input.entities[1].reportedAt = '2026-10-11T00:00:00Z';
+  const decision = planThermal(input)[0];
+  assert.deepEqual(decision.command, { entityId: 'climate.cv', service: 'climate.set_temperature', value: 21 });
+  assert.doesNotMatch(decision.reason, /Kamertemperatuur in Celsius/);
+
+  input.thermal.rooms[0].temperatureEntity = null;
+  assert.deepEqual(planThermal(input)[0].command, { entityId: 'climate.cv', service: 'climate.set_temperature', value: 21 });
+});
+
+test('actieve Warmte stuurt het Tado-doel zonder recente current_temperature naar Home Assistant', async () => {
+  const input = fixture();
+  input.thermal.mode = 'active';
+  input.thermal.rooms[0].temperatureEntity = 'climate.cv';
+  input.entities[1].currentTemperature = null;
+  input.entities[1].reportedAt = '2026-10-11T00:00:00Z';
+  const snapshot = { control: input.settings, thermal: input.thermal, mappings: input.mappings, preferences: {} };
+  const sent = [];
+  const runner = createRuleRunner({ store: { get: () => structuredClone(snapshot) },
+    provider: async () => ({ connected: true, entities: input.entities }), unitProvider: async () => '°C',
+    execute: async command => sent.push(command), activeAllowed: true, clock: () => input.now });
+
+  await runner.tick();
+
+  assert.deepEqual(sent, [{ entityId: 'climate.cv', service: 'climate.set_temperature', value: 21 }]);
+  assert.equal(runner.status().decisions[0].status, 'sent');
 });
 
 test('een bron heeft een gekoppelde regelkamer, bestaande configuraties blijven monitor-only', () => {

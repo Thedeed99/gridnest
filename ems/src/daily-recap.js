@@ -1,4 +1,5 @@
 const MAX_GAP_MS = 30 * 60 * 1000;
+const HALF_HOUR_MS = 30 * 60 * 1000;
 
 function startOfLocalDay(now) {
   const start = new Date(now);
@@ -107,7 +108,7 @@ export function dailyEnergyRecap(history, meters, now = new Date()) {
     let complete = Boolean(previous && start - previous.timestamp <= MAX_GAP_MS);
     let coverageMs = 0;
     const totals = new Map();
-    const hours = Array.from({ length: 24 }, (_, hour) => ({ hour, energyKwh: 0, coverageMs: 0, complete: true }));
+    const periods = Array.from({ length: 48 }, (_, index) => ({ index, energyKwh: 0, coverageMs: 0, complete: true }));
 
     for (let pointIndex = 0; pointIndex < points.length; pointIndex++) {
       const point = points[pointIndex];
@@ -132,10 +133,9 @@ export function dailyEnergyRecap(history, meters, now = new Date()) {
       if (meter.kind === 'production') {
         let cursor = from;
         while (cursor < to) {
-          const date = new Date(cursor);
-          const bucket = hours[date.getHours()];
-          date.setHours(date.getHours() + 1, 0, 0, 0);
-          const until = Math.min(to, date.getTime());
+          const index = Math.min(periods.length - 1, Math.floor((cursor - start) / HALF_HOUR_MS));
+          const bucket = periods[index];
+          const until = Math.min(to, start + (index + 1) * HALF_HOUR_MS);
           const slice = until - cursor;
           bucket.energyKwh += Math.abs(point.watts) * slice / 3_600_000_000;
           bucket.coverageMs += slice;
@@ -151,13 +151,10 @@ export function dailyEnergyRecap(history, meters, now = new Date()) {
       rows.push({ label, entityId: meter.id, kind: meter.kind,
         energyKwh: coverageMs ? totals.get(label) ?? 0 : null,
         complete: complete && coverageMs >= Math.max(0, end - start - MAX_GAP_MS),
-        ...(meter.kind === 'production' ? { hours: hours.map(bucket => {
-          const hourStart = new Date(start);
-          hourStart.setHours(bucket.hour);
-          const hourEnd = new Date(hourStart);
-          hourEnd.setHours(bucket.hour + 1);
-          const expectedMs = Math.max(0, Math.min(end, hourEnd.getTime()) - hourStart.getTime());
-          return { hour: bucket.hour, energyKwh: bucket.coverageMs ? bucket.energyKwh : null,
+        ...(meter.kind === 'production' ? { periods: periods.map(bucket => {
+          const periodStart = start + bucket.index * HALF_HOUR_MS;
+          const expectedMs = Math.max(0, Math.min(end, periodStart + HALF_HOUR_MS) - periodStart);
+          return { index: bucket.index, energyKwh: bucket.coverageMs ? bucket.energyKwh : null,
             complete: expectedMs > 0 && bucket.complete && bucket.coverageMs >= expectedMs };
         }) } : {}) });
     }

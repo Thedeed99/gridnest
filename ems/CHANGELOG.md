@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.4 - 2026-10-13
+
+- Stuur Tado-kamerdoelen ook als de actuele kamertemperatuur ontbreekt of verouderd is; afwezigheidsregeling blijft op aanwezigheid gebaseerd.
+- Toon bij de laadpaal Kabel vergrendeld of Kabel ontgrendeld in plaats van Aan/Uit.
+- Bedien elke accuschakelaar per accu en toon de echte schakelaarstatus zonder bevestigingsdialoog.
+- Bied verversen elke seconde aan voor snellere updates van de meetweergaven.
+- Toon zonneproductie in halfuurvakken en behoud de laatste dagrecap tijdens verversen; de handmatige refresh ververst ook gas en water.
+
 ## 1.0.3 - 2026-10-13
 
 - Bedien extra accuschakelaars via hun eigen batterijconfiguratie, zonder koppeling als bekende verbruiker.
