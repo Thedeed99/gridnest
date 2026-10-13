@@ -127,6 +127,24 @@ export function createApp({ store, entitiesProvider, demo = false, supervisor = 
       return response.status(503).json({ error: error.message || 'Accubediening mislukt.' });
     }
   });
+  app.post('/api/battery/levels', async (request, response) => {
+    const body = z.object({ batteryId: z.string(), min: z.number().finite().min(0).max(100), max: z.number().finite().min(0).max(100), confirm: z.literal(true) }).strict().parse(request.body);
+    if (!supervisor || demo || !runner?.status().activeAllowed || store.get().control.mode !== 'active') return response.status(403).json({ error: 'Batterijniveaus instellen vereist vrijgave en Actief.' });
+    if (body.min >= body.max) return response.status(400).json({ error: 'Minimum moet lager zijn dan maximum.' });
+    const mappings = store.get().mappings;
+    const battery = body.batteryId === 'main_battery' ? { minLevelEntity: mappings.batteryMinLevel, maxLevelEntity: mappings.batteryMaxLevel } : mappings.batteries.find(item => item.id === body.batteryId);
+    if (mappings.batteryMode === 'none' || !battery?.minLevelEntity || !battery.maxLevelEntity || battery.minLevelEntity === battery.maxLevelEntity) return response.status(409).json({ error: 'Koppel twee afzonderlijke niveau-entiteiten voor deze batterij.' });
+    const connection = await entitiesProvider();
+    const commands = [['minLevelEntity', body.min], ['maxLevelEntity', body.max]].map(([key, value]) => {
+      const entity = connection.entities.find(item => item.id === battery[key]);
+      return { entity, value };
+    });
+    if (!connection.connected || commands.some(({ entity, value }) => !entity?.available || entity.domain !== 'number' || entity.unit !== '%' || entity.state.trim() === '' || !Number.isFinite(Number(entity.state)) || !Number.isFinite(entity.minimum) || !Number.isFinite(entity.maximum) || !Number.isFinite(entity.step) || entity.step <= 0 || value < entity.minimum || value > entity.maximum || Math.abs((value - entity.minimum) / entity.step - Math.round((value - entity.minimum) / entity.step)) > 0.000001)) return response.status(409).json({ error: 'Niveau-entiteiten of waarden zijn niet geldig voor dit apparaat.' });
+    if (JSON.stringify(store.get().mappings) !== JSON.stringify(mappings) || !runner.status().activeAllowed || store.get().control.mode !== 'active') return response.status(409).json({ error: 'Vrijgave of koppelingen gewijzigd.' });
+    if (body.min >= Number(commands[1].entity.state)) commands.reverse();
+    for (const { entity, value } of commands) await evCommandProvider({ entityId: entity.id, service: 'number.set_value', value });
+    response.json({ sent: true });
+  });
   app.post('/api/ev/control', async (request, response) => {
     const body = z.discriminatedUnion('action', [
       z.object({ action: z.literal('enable'), enabled: z.boolean(), confirm: z.literal(true) }).strict(),

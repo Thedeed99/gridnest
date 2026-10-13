@@ -61,6 +61,7 @@ export function demoEntities() {
     sensor('sensor.demo_battery_input', 'Thuisbatterij · Input', 121, 'W', 'power'),
     sensor('sensor.demo_battery_output', 'Thuisbatterij · Output', 121, 'W', 'power'),
     sensor('sensor.demo_battery_remaining', 'Thuisbatterij · Resterende tijd', 4, 'h', 'duration'),
+    sensor('sensor.ups_battery_charging_state', 'UPS · Laadstatus', 'pass_through', ''),
     { entity_id: 'number.demo_ev_current', state: '6', last_updated: now,
       attributes: { friendly_name: 'Laadpaal · Stroomlimiet', unit_of_measurement: 'A', min: 6, max: 16, step: 1 } },
     { entity_id: 'number.demo_battery_target', state: '0', last_updated: now,

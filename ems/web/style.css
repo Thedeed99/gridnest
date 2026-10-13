@@ -288,6 +288,13 @@ footer { display: flex; justify-content: space-between; gap: 12px; font-size: 10
 .mapping-group h2 { font-size: 16px; margin: 0 0 8px; }
 .appliance-panel { width: 100%; min-width: 0; background: #1e4036; color: #f5faf7; border-radius: 8px; overflow: hidden; padding: 20px 16px 24px; margin-bottom: 24px; }
 .battery-panel { padding-bottom: 32px; }
+.battery-level-settings { display: grid; gap: 12px; margin-top: 20px; border-top: 1px solid #ffffff14; padding-top: 16px; }
+.battery-limits-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.battery-level-settings .mapping-setting { min-width: 0; }
+.battery-level-settings .mapping-setting span { display: block; font-size: 11px; color: #bbcfc8; margin-bottom: 6px; }
+.battery-level-settings input { width: 100%; min-height: 40px; background: #ffffff12; border: 1px solid #78958b; color: #f5faf7; border-radius: 6px; padding: 8px 12px; font-size: 13px; }
+.battery-level-settings input:disabled { opacity: .55; cursor: not-allowed; }
+.battery-limits-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
 .appliance-header { display: flex; align-items: center; gap: 12px; }
 .appliance-header > svg { width: 22px; height: 22px; flex-shrink: 0; }
 .appliance-header h2 { font-size: 15px; margin: 0 0 3px; color: inherit; }
