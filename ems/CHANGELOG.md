@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.5 - 2026-10-13
+
+- Update meetwaarden op alle pagina's zonder de pagina of onderdelen opnieuw op te bouwen; behoud invoer en bedieningen.
+- Laat automatische refresh de refreshknop ongemoeid; toon alleen voortgang bij handmatig vernieuwen.
+- Gebruik light/dark theme-kleuren voor Zonnepanelen, Laadpaal en Batterij en kleur bestaande grafieken mee bij een themewissel.
+
 ## 1.0.4 - 2026-10-13
 
 - Stuur Tado-kamerdoelen ook als de actuele kamertemperatuur ontbreekt of verouderd is; afwezigheidsregeling blijft op aanwezigheid gebaseerd.

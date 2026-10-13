@@ -15,7 +15,7 @@ test('Gridnest metadata, pakketversie en containerlabel komen overeen', async ()
   assert.equal(config.name, 'Gridnest');
   assert.equal(config.slug, 'gridnest');
   assert.equal(pkg.name, 'gridnest');
-  assert.equal(config.version, '1.0.4');
+  assert.equal(config.version, '1.0.5');
   assert.equal(config.version, pkg.version);
   assert.equal(lock.version, pkg.version);
   assert.equal(lock.packages[''].version, pkg.version);

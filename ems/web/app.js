@@ -39,6 +39,7 @@ let dailyRecapCache;
 let dailyRecapPanelNode;
 let dailyRecapContentNode;
 let dailyRecapLoadPromise;
+const liveBindings = new Map();
 let solarLimitConsentEntity;
 let solarLimitPending = false;
 
@@ -53,6 +54,24 @@ const element = (tag, className, text) => {
   if (text !== undefined) node.textContent = text;
   return node;
 };
+function bindLive(node, update) {
+  liveBindings.set(node, update);
+  update();
+  return node;
+}
+function liveText(tag, className, read) {
+  const node = element(tag, className);
+  return bindLive(node, () => {
+    const value = String(read() ?? '');
+    if (node.textContent !== value) node.textContent = value;
+  });
+}
+function updateLiveBindings() {
+  for (const [node, update] of liveBindings) {
+    if (!node.isConnected) liveBindings.delete(node);
+    else update();
+  }
+}
 const number = value => new Intl.NumberFormat('nl-NL', { maximumFractionDigits: 1 }).format(value);
 function powerText(value) {
   return formatPower(value, powerUnit);
@@ -99,7 +118,6 @@ async function api(path, options = {}) {
   if (!response.ok) throw new Error(body.error || 'Verzoek mislukt.');
   return body;
 }
-
 function syncDeviceNavigation() {
   const rules = data.control?.rules ?? [];
   const hasEv = data.mappings.evMode !== 'none' && Boolean(['evPower', 'evSoc', 'evEnergyTotal', 'evEnable', 'evCurrentLimit', 'evCableStatus', 'evLockStatus', 'evSessionEnergy', 'evPhase1Current', 'evPhase2Current', 'evPhase3Current'].some(role => data.mappings[role]) || rules.some(rule => ['ev_enable', 'ev_current'].includes(rule.action.type)));
@@ -129,13 +147,15 @@ function setRefreshInterval(seconds) {
   }, seconds * 1000) : undefined;
 }
 
-async function refresh() {
+async function refresh(showButtonProgress = false) {
   if (loading) return;
   loading = true;
-  document.querySelector('#refresh').disabled = true;
+  const refreshButton = document.querySelector('#refresh');
+  if (showButtonProgress) refreshButton.disabled = true;
   try {
     data = await api('bootstrap');
     setRefreshInterval(data.preferences.refreshSeconds ?? 10);
+    const previousView = view;
     syncDeviceNavigation();
     mappingsDraft ??= { ...data.mappings };
     preferencesDraft ??= { ...data.preferences };
@@ -144,16 +164,34 @@ async function refresh() {
     document.querySelector('#connection').textContent = data.demo ? 'Voorbeeldwoning · Demodata' : data.message;
     document.querySelector('#connection').className = data.demo ? 'demo-status' : data.connected ? 'connected-status' : 'offline-status';
     document.querySelector('#timestamp').textContent = `Opgehaald om ${formatTime(data.fetchedAt)}`;
-    if (['overview', 'thermal', 'ev', 'battery', 'solar'].includes(view) || main.getAttribute('aria-busy') === 'true') render();
-    else if (view === 'rules') updateRuleStatus();
+    if (main.getAttribute('aria-busy') === 'true' || view !== previousView) render();
+    else {
+      updateLiveBindings();
+      if (view === 'rules') updateRuleStatus();
+      if (view === 'overview' && dailyRecapPanelNode && (!dailyRecapCache || Date.now() - dailyRecapCache.fetchedAt > 30000)) loadDailyRecap(dailyRecapContentNode);
+      if (view === 'overview') {
+        for (const [utility, preference, role] of [['gas', 'showGas', 'gasConsumption'], ['water', 'showWater', 'waterConsumption']]) {
+          const entityId = data.mappings[role];
+          const status = main.querySelector(`.utility-history-${utility}`);
+          const cached = entityId && utilityHistoryCache[`${utility}:${entityId}`];
+          if (data.preferences[preference] && entityId && status && (!cached || Date.now() - cached.fetchedAt > 30000)) drawUtilityCharts(utility, status, entityId);
+        }
+      }
+      if (view === 'solar') {
+        const panel = main.querySelector('.solar-panel');
+        if (panel && (!dailyRecapCache || Date.now() - dailyRecapCache.fetchedAt > 30000)) loadSolarChart(panel);
+      }
+    }
   } catch (error) {
     document.querySelector('#connection').textContent = 'Verbinding met EMS verbroken';
-    main.setAttribute('aria-busy', 'false');
-    main.replaceChildren(element('h1', '', 'Verbinding niet beschikbaar'), element('p', '', 'Metingen kunnen niet worden opgehaald.'));
+    if (!data) {
+      main.setAttribute('aria-busy', 'false');
+      main.replaceChildren(element('h1', '', 'Verbinding niet beschikbaar'), element('p', '', 'Metingen kunnen niet worden opgehaald.'));
+    }
     notify(error.message, true);
   } finally {
     loading = false;
-    document.querySelector('#refresh').disabled = false;
+    if (showButtonProgress) refreshButton.disabled = false;
   }
 }
 
@@ -177,9 +215,12 @@ function solarOutlook(parent) {
     const row = element('div', 'solar-outlook-row');
     row.append(element('strong', 'solar-period', 'Nu'));
     const values = element('div', 'solar-outlook-values');
-    for (const [label, value] of [['Verwacht', powerText(outlook.expectedNowKw)], ['Actueel', powerText(outlook.actualNowKw)]]) {
+    for (const [label, read] of [
+      ['Verwacht', () => powerText(data.energy?.solarOutlook?.expectedNowKw)],
+      ['Actueel', () => powerText(data.energy?.solarOutlook?.actualNowKw)]
+    ]) {
       const item = element('div', 'solar-outlook-value');
-      item.append(element('span', '', label), element('strong', '', value));
+      item.append(element('span', '', label), liveText('strong', '', read));
       values.append(item);
     }
     row.append(values);
@@ -190,7 +231,10 @@ function solarOutlook(parent) {
     row.append(element('strong', 'solar-period', 'Vandaag'));
     const values = element('div', 'solar-outlook-values');
     const expected = element('div', 'solar-outlook-value');
-    expected.append(element('span', '', 'Verwacht'), element('strong', '', outlook.expectedTodayKwh === null ? 'Niet beschikbaar' : `${number(outlook.expectedTodayKwh)} kWh`));
+        expected.append(element('span', '', 'Verwacht'), liveText('strong', '', () => {
+          const value = data.energy?.solarOutlook?.expectedTodayKwh;
+          return value === null || value === undefined ? 'Niet beschikbaar' : `${number(value)} kWh`;
+        }));
     const cachedRecap = dailyRecapCache?.mappingsKey === JSON.stringify(data.mappings) ? dailyRecapCache : null;
     const cachedSolarRow = cachedRecap?.rows?.find(item => item.label === 'Zonnepanelen');
     const actual = element('span', 'solar-actual-today', cachedRecap
@@ -214,6 +258,25 @@ function batteryInfo(config) {
   return batteryState(config.chargingStateEntity ? status ?? { available: false } : null, raw);
 }
 
+function batteryFlowSummary() {
+  const batteries = [
+    ...(data.mappings.batteryPower ? [{ powerEntity: data.mappings.batteryPower, chargingStateEntity: data.mappings.batteryChargingState, isMain: true }] : []),
+    ...(data.mappings.batteries ?? [])
+  ];
+  let watts = 0;
+  let measured = false;
+  for (const battery of batteries) {
+    const power = batteryInfo(battery).powerW;
+    if (power === null) continue;
+    watts += power;
+    measured = true;
+  }
+  const powerKw = measured ? watts / 1000 : data.demo && data.mappings.batteryMode !== 'none' ? 0.75 : null;
+  const hasThroughput = batteries.length > 0 && batteries.every(battery => batteryInfo(battery).label === 'Doorvoer');
+  const label = powerKw === null ? 'Status onbekend' : powerKw < -0.01 ? 'Naar woning' : powerKw > 0.01 ? 'Aan het laden' : hasThroughput ? 'Doorvoer' : 'Stand-by';
+  return { powerKw, label };
+}
+
 function overview() {
   const visibleRoles = data.roles.filter(role => role.id !== 'presence');
   const mapped = visibleRoles.filter(role => Boolean(data.mappings[role.id])).length;
@@ -224,7 +287,7 @@ function overview() {
     const metric = element('div', `metric metric-${role}`);
     const label = element('div', 'metric-label', title);
     label.prepend(icon(name));
-    metric.append(label, element('strong', '', measurement(role)));
+    metric.append(label, liveText('strong', '', () => measurement(role)));
     metrics.append(metric);
   }
   main.append(metrics);
@@ -233,39 +296,8 @@ function overview() {
   sectionHeader.append(element('h2', '', 'Energiestromen'), element('span', 'tag', data.demo ? 'DEMO' : 'MONITOR'));
   const flow = element('div', 'flow');
 
-  // Bepaal batterijstatus voor energiestromen (saldo van hoofdbatterij + extra batterijen)
-  let batPowerKw = null;
-  let totalBatW = 0;
-  let hasAnyBatPower = false;
-
-  // 1. Hoofdbatterij vermogen
-  if (data.mappings?.batteryPower) {
-    const reading = data.readings.find(item => item.role === 'batteryPower');
-    if (reading?.valid && Number.isFinite(Number(reading.value))) {
-      const w = Number(reading.value) * (reading.unit === 'kW' ? 1000 : 1);
-      const signedW = w * (data.mappings.batteryDirection === 'positive-discharge' ? -1 : 1);
-      const actual = batteryState(data.mappings.batteryChargingState ? data.entities.find(item => item.id === data.mappings.batteryChargingState) ?? { available: false } : null, signedW).powerW;
-      if (actual !== null) { totalBatW += actual; hasAnyBatPower = true; }
-    }
-  }
-
-  // 2. Extra batterijsystemen vermogen
-  if (data.mappings?.batteries?.length) {
-    for (const b of data.mappings.batteries) {
-      const pEnt = data.entities.find(e => e.id === b.powerEntity);
-      if (pEnt?.available && pEnt.state.trim() !== '' && Number.isFinite(Number(pEnt.state))) {
-        const w = Number(pEnt.state) * (pEnt.unit === 'kW' ? 1000 : 1);
-        const actual = batteryInfo(b).powerW;
-        if (actual !== null) { totalBatW += actual; hasAnyBatPower = true; }
-      }
-    }
-  }
-
-  if (hasAnyBatPower) {
-    batPowerKw = totalBatW / 1000;
-  } else if (data.demo && data.mappings?.batteryMode !== 'none' && !data.mappings.batteryChargingState && !data.mappings.batteries?.some(item => item.chargingStateEntity)) {
-    batPowerKw = -0.45 + 1.2 + 0; // saldo demo
-  }
+  const batteryFlow = batteryFlowSummary();
+  const batPowerKw = batteryFlow.powerKw;
 
   const hasBattery = data.mappings.batteryMode !== 'none' && Boolean(
     data.mappings?.batterySoc || data.mappings?.batteryPower || (data.mappings?.batteries && data.mappings.batteries.length > 0) || (data.demo && data.mappings.batteryMode !== 'none')
@@ -277,12 +309,6 @@ function overview() {
 
   const isBatDischarging = batPowerKw !== null && batPowerKw < -0.01;
   const isBatCharging = batPowerKw !== null && batPowerKw > 0.01;
-  const flowBatteries = [
-    ...(['batterySoc', 'batteryPower', 'batteryEnable', 'batteryInputPower', 'batteryOutputPower', 'batteryRemainingTime', 'batteryHealth', 'batteryChargingState'].some(role => data.mappings[role])
-      ? [{ powerEntity: data.mappings.batteryPower, chargingStateEntity: data.mappings.batteryChargingState, isMain: true }] : []),
-    ...(data.mappings.batteries ?? [])
-  ];
-  const hasBatteryThroughput = flowBatteries.length > 0 && flowBatteries.every(item => batteryInfo(item).label === 'Doorvoer');
   const batFlowClass = isBatDischarging ? 'flow-active-to-home' : isBatCharging ? 'flow-active-from-home' : '';
 
   // Bepaal SVG lijnen op basis van actieve knooppunten
@@ -297,6 +323,11 @@ function overview() {
   flowPaths += '<circle cx="300" cy="155" r="8"/>';
 
   flow.innerHTML = `<svg class="flow-lines" viewBox="0 0 600 320" preserveAspectRatio="none" aria-hidden="true">${flowPaths}</svg>`;
+  const batteryPath = flow.querySelector('path[d="M100 250 L300 155"]');
+  if (batteryPath) bindLive(batteryPath, () => {
+    const power = batteryFlowSummary().powerKw;
+    batteryPath.setAttribute('class', power !== null && power < -0.01 ? 'flow-active-to-home' : power !== null && power > 0.01 ? 'flow-active-from-home' : '');
+  });
 
   const nodes = [
     ['solar-node', 'Zon', 'sun', 'solar'],
@@ -323,17 +354,31 @@ function overview() {
     }
     const node = element('div', nodeClass);
     if (role === 'battery') {
-      const batLabel = isBatDischarging ? 'Naar woning' : isBatCharging ? 'Aan het laden' : batPowerKw === 0 && hasBatteryThroughput ? 'Doorvoer' : batPowerKw === null ? 'Status onbekend' : 'Stand-by';
-      const batDisplay = batPowerKw !== null ? powerText(Math.abs(batPowerKw)) : 'Niet beschikbaar';
-      node.append(icon(isBatDischarging ? 'arrow-up-right' : 'battery-charging'), element('span', '', title), element('strong', '', batDisplay), element('small', '', batLabel));
+      node.append(icon(isBatDischarging ? 'arrow-up-right' : 'battery-charging'), element('span', '', title),
+        liveText('strong', '', () => { const power = batteryFlowSummary().powerKw; return power === null ? 'Niet beschikbaar' : powerText(Math.abs(power)); }),
+        liveText('small', '', () => batteryFlowSummary().label));
+      bindLive(node, () => {
+        const power = batteryFlowSummary().powerKw;
+        node.classList.toggle('flow-active-to-home', power !== null && power < -0.01);
+        node.classList.toggle('flow-active-from-home', power !== null && power > 0.01);
+      });
     } else {
-      node.append(icon(name), element('span', '', title), element('strong', '', role ? measurement(role) : measurement('totalConsumption')));
+      node.append(icon(name), element('span', '', title), liveText('strong', '', () => measurement(role || 'totalConsumption')));
       if (!role) {
-        node.append(element('small', '', measurement('presence')));
-        if (isBatDischarging) node.append(element('small', 'battery-feeding-badge', `Batterij levert: ${powerText(Math.abs(batPowerKw))}`));
+        node.append(liveText('small', '', () => measurement('presence')));
+        const batteryBadge = liveText('small', 'battery-feeding-badge', () => {
+          const power = batteryFlowSummary().powerKw;
+          return power !== null && power < -0.01 ? `Batterij levert: ${powerText(Math.abs(power))}` : '';
+        });
+        bindLive(batteryBadge, () => { batteryBadge.hidden = !(batteryFlowSummary().powerKw < -0.01); });
+        node.append(batteryBadge);
+        bindLive(node, () => {
+          node.classList.toggle('home-node-present', data.householdPresence?.occupied === true);
+          node.classList.toggle('home-node-away', data.householdPresence?.occupied === false);
+        });
       }
-      if (role === 'evPower' && data.mappings.evSoc) node.append(element('small', '', `Accu: ${measurement('evSoc')}`));
-      if (role === 'gridImport') node.append(element('small', '', `Terug: ${measurement('gridExport')}`));
+      if (role === 'evPower' && data.mappings.evSoc) node.append(liveText('small', '', () => `Accu: ${measurement('evSoc')}`));
+      if (role === 'gridImport') node.append(liveText('small', '', () => `Terug: ${measurement('gridExport')}`));
     }
     flow.append(node);
   }
@@ -348,25 +393,36 @@ function overview() {
       const row = element('div', 'phase-load-row');
       row.append(element('strong', '', phase.phase));
       const values = element('div', 'phase-load-values');
-      const activePower = phase.activePowerKw;
       values.classList.add('phase-load-details');
-      const primary = activePower === null
-        ? phase.apparentPowerVA === null ? '—' : `${number(phase.apparentPowerVA)} VA`
-        : `${powerText(activePower)}`;
-      row.append(element('span', 'phase-load-primary', primary));
-      for (const [label, value] of [['Stroom', phase.currentA === null ? '— A' : `${number(phase.currentA)} A`], ['Spanning', phase.voltageV === null ? '— V' : `${number(phase.voltageV)} V`]]) {
+      row.append(liveText('span', 'phase-load-primary', () => {
+        const current = data.energy?.phaseLoads?.find(item => item.phase === phase.phase);
+        return current?.activePowerKw === null || current?.activePowerKw === undefined
+          ? current?.apparentPowerVA === null || current?.apparentPowerVA === undefined ? '—' : `${number(current.apparentPowerVA)} VA`
+          : powerText(current.activePowerKw);
+      }));
+      for (const label of ['Stroom', 'Spanning']) {
         const detail = element('span', 'phase-load-reading');
-        detail.textContent = value;
-        detail.title = label;
-        detail.setAttribute('aria-label', `${label}: ${value}`);
+        bindLive(detail, () => {
+          const current = data.energy?.phaseLoads?.find(item => item.phase === phase.phase);
+          const reading = label === 'Stroom' ? current?.currentA : current?.voltageV;
+          const value = reading === null || reading === undefined ? label === 'Stroom' ? '— A' : '— V' : `${number(reading)} ${label === 'Stroom' ? 'A' : 'V'}`;
+          detail.textContent = value;
+          detail.title = label;
+          detail.setAttribute('aria-label', `${label}: ${value}`);
+        });
         values.append(detail);
       }
-      if (phase.currentA !== null) {
+      const phaseNumber = Number(phase.phase.slice(1));
+      if (data.mappings[`phase${phaseNumber}Current`]) {
         const meter = element('meter', 'phase-current-meter');
-        meter.min = 0;
-        meter.max = Math.max(25, Math.ceil(phase.currentA));
-        meter.value = phase.currentA;
-        meter.setAttribute('aria-label', `Stroomsterkte ${phase.phase}`);
+        bindLive(meter, () => {
+          const current = data.energy?.phaseLoads?.find(item => item.phase === phase.phase)?.currentA;
+          meter.min = 0;
+          meter.max = Math.max(25, Math.ceil(current ?? 0));
+          meter.value = current ?? 0;
+          meter.hidden = current === null || current === undefined;
+          meter.setAttribute('aria-label', `Stroomsterkte ${phase.phase}`);
+        });
         values.append(meter);
       }
       row.append(values);
@@ -398,43 +454,51 @@ function consumptionSplit() {
   const section = element('section', 'consumption-section');
   const header = element('div', 'section-heading');
   const sourceLabels = { sensor: 'GEMETEN TOTAAL', balance: 'BEREKEND TOTAAL', unavailable: 'ONVOLLEDIG' };
-  header.append(element('h2', '', 'Verbruik nu'), element('span', 'tag', sourceLabels[energy.totalSource]));
+  header.append(element('h2', '', 'Verbruik nu'), liveText('span', 'tag', () => sourceLabels[data.energy?.totalSource] ?? 'ONVOLLEDIG'));
   const totals = element('div', 'consumption-totals');
-  for (const [label, value, className] of [['Totaal woning', energy.totalKw, 'total'], ['Bekende verbruikers', energy.knownKw, 'known'], ['Onbekend / niet toegewezen', energy.unknownKw, 'unknown']]) {
+  for (const [label, field, className] of [['Totaal woning', 'totalKw', 'total'], ['Bekende verbruikers', 'knownKw', 'known'], ['Onbekend / niet toegewezen', 'unknownKw', 'unknown']]) {
     const stat = element('div', `consumption-stat ${className}`);
-    stat.append(element('span', '', label), element('strong', '', powerText(value)));
+    stat.append(element('span', '', label), liveText('strong', '', () => powerText(data.energy?.[field] ?? null)));
     totals.append(stat);
   }
   section.append(header, totals);
-  if (energy.status === 'complete' && energy.totalKw > 0) {
-    const meter = element('meter', 'consumption-meter');
+  const meter = element('meter', 'consumption-meter');
+  bindLive(meter, () => {
+    const current = data.energy;
     meter.min = 0;
-    meter.max = energy.totalKw;
-    meter.value = energy.knownKw;
+    meter.max = current?.totalKw ?? 1;
+    meter.value = current?.knownKw ?? 0;
+    meter.hidden = current?.status !== 'complete' || !(current.totalKw > 0);
     meter.setAttribute('aria-label', 'Aandeel bekend verbruik in totaal woningverbruik');
-    section.append(meter);
-  }
+  });
+  section.append(meter);
   if (energy.consumers.length) {
     const list = element('ul', 'consumer-readings');
     for (const consumer of energy.consumers) {
       const row = element('li', 'consumer-tile');
       const switchId = data.mappings.knownConsumerSwitches?.[consumer.id];
-      const actuator = data.entities.find(item => item.id === switchId);
-      const knownState = actuator?.available && ['on', 'off'].includes(actuator.state);
       row.dataset.consumerId = consumer.id;
-      row.dataset.state = switchId && knownState ? actuator.state : 'unknown';
-      row.append(element('span', 'consumer-name', consumer.name), element('strong', 'consumer-value', powerText(consumer.powerKw)));
+      row.dataset.state = 'unknown';
+      row.append(element('span', 'consumer-name', consumer.name), liveText('strong', 'consumer-value', () => {
+        const current = data.energy?.consumers?.find(item => item.id === consumer.id);
+        return powerText(current?.powerKw ?? null);
+      }));
       if (switchId) {
-        const enabled = actuator?.state === 'on';
+        const currentActuator = () => data.entities.find(item => item.id === data.mappings.knownConsumerSwitches?.[consumer.id]);
         const executeToggle = async () => {
           try {
+            const actuator = currentActuator();
+            if (!actuator?.available || !['on', 'off'].includes(actuator.state)) return;
             await api('consumers/enable', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ consumerId: consumer.id, switchId, enabled: !enabled, expectedState: actuator.state, confirm: true }) });
+              body: JSON.stringify({ consumerId: consumer.id, switchId: actuator.id, enabled: actuator.state !== 'on', expectedState: actuator.state, confirm: true }) });
             notify('Verbruikerschakelaar aangestuurd.');
             await refresh();
           } catch (error) { notify(error.message, true); }
         };
-        const toggle = toolButton('power', knownState ? `${consumer.name} ${enabled ? 'uitschakelen' : 'inschakelen'}` : `${consumer.name}: schakelstatus onbekend`, () => {
+        const toggle = toolButton('power', `${consumer.name}: schakelstatus onbekend`, () => {
+          const actuator = currentActuator();
+          const enabled = actuator?.state === 'on';
+          if (!actuator?.available || !['on', 'off'].includes(actuator.state)) return;
           if (data.preferences?.confirmSwitches === false) {
             executeToggle();
             return;
@@ -450,8 +514,10 @@ function consumptionSplit() {
           confirm.addEventListener('click', async () => {
             confirm.disabled = true;
             try {
+              const latest = currentActuator();
+              if (!latest?.available || !['on', 'off'].includes(latest.state)) throw new Error('De schakelaarstatus is niet beschikbaar.');
               await api('consumers/enable', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ consumerId: consumer.id, switchId, enabled: !enabled, expectedState: actuator.state, confirm: true }) });
+                body: JSON.stringify({ consumerId: consumer.id, switchId: latest.id, enabled: latest.state !== 'on', expectedState: latest.state, confirm: true }) });
               dialog.close();
               notify('Verbruikerschakelaar aangestuurd.');
               await refresh();
@@ -465,11 +531,16 @@ function consumptionSplit() {
           dialog.showModal();
         });
         toggle.classList.add('consumer-toggle');
-        if (knownState) {
+        bindLive(toggle, () => {
+          const actuator = currentActuator();
+          const known = actuator?.available && ['on', 'off'].includes(actuator.state);
+          toggle.title = known ? `${consumer.name} ${actuator.state === 'on' ? 'uitschakelen' : 'inschakelen'}` : `${consumer.name}: schakelstatus onbekend`;
+          toggle.setAttribute('aria-label', toggle.title);
           toggle.setAttribute('role', 'switch');
-          toggle.setAttribute('aria-checked', String(enabled));
-        }
-        toggle.disabled = !knownState || !data.controlStatus?.activeAllowed;
+          toggle.setAttribute('aria-checked', String(known && actuator.state === 'on'));
+          toggle.disabled = !known || !data.controlStatus?.activeAllowed;
+          row.dataset.state = known ? actuator.state : 'unknown';
+        });
         row.append(toggle);
       }
       list.append(row);
@@ -523,6 +594,7 @@ function batteriesOverview() {
 
   for (const item of items) {
     const row = element('div', 'battery-row');
+    row.dataset.batteryId = item.id;
     const socEntity = data.entities.find(e => e.id === item.socEntity);
     const powerEntity = data.entities.find(e => e.id === item.powerEntity);
 
@@ -564,19 +636,38 @@ function batteriesOverview() {
     const rowHeader = element('div', 'battery-row-header');
     const identity = element('div', 'battery-identity');
     identity.append(icon(stateClass === 'charging' ? 'battery-charging' : 'battery'), element('span', '', item.name));
-    const stateSpan = element('span', `battery-state ${stateClass}`, stateLabel);
+    const stateSpan = liveText('span', `battery-state ${stateClass}`, () => batteryInfo(item).label);
+    bindLive(stateSpan, () => {
+      const actual = batteryInfo(item);
+      const state = actual.powerW === null ? 'idle' : actual.powerW > 10 ? 'charging' : actual.powerW < -10 ? 'discharging' : 'idle';
+      stateSpan.className = `battery-state ${state}`;
+      stateSpan.textContent = actual.label;
+    });
     rowHeader.append(identity, stateSpan);
 
     const detailsLeft = element('div', 'battery-details-left');
     const socText = socVal !== null ? `${number(socVal)} %` : '— %';
-    detailsLeft.append(element('span', 'battery-soc', socText));
+    detailsLeft.append(liveText('span', 'battery-soc', () => {
+      const entity = data.entities.find(current => current.id === item.socEntity);
+      return entity?.available && Number.isFinite(Number(entity.state)) ? `${number(Math.round(Number(entity.state)))} %` : '— %';
+    }));
     const bar = element('div', 'battery-level-bar');
     const fill = element('div', 'battery-level-fill');
-    fill.style.width = `${socVal !== null ? Math.max(0, Math.min(100, socVal)) : 0}%`;
+    bindLive(fill, () => {
+      const entity = data.entities.find(current => current.id === item.socEntity);
+      const value = entity?.available && Number.isFinite(Number(entity.state)) ? Number(entity.state) : null;
+      fill.style.width = `${value === null ? 0 : Math.max(0, Math.min(100, value))}%`;
+    });
     bar.append(fill);
     detailsLeft.append(bar);
 
-    const powerStrong = element('strong', 'battery-power', powerDisplay);
+    const powerStrong = liveText('strong', 'battery-power', () => {
+      const power = batteryInfo(item).powerW;
+      if (power === null) return 'Niet beschikbaar';
+      if (power > 10) return `+${powerText(power / 1000)}`;
+      if (power < -10) return powerText(power / 1000);
+      return '0 W';
+    });
 
     row.append(rowHeader, detailsLeft, powerStrong);
     card.append(row);
@@ -589,7 +680,10 @@ function batteriesOverview() {
     const prefix = totalWatts > 10 ? '+' : '';
     totalRow.append(
       element('span', '', 'Totaal batterijvermogen'),
-      element('strong', '', `${prefix}${powerText(totalWatts / 1000)}`)
+      liveText('strong', '', () => {
+        const currentTotal = items.reduce((sum, item) => sum + (batteryInfo(item).powerW ?? 0), 0);
+        return `${currentTotal > 10 ? '+' : ''}${powerText(currentTotal / 1000)}`;
+      })
     );
     section.append(totalRow);
   }
@@ -644,7 +738,6 @@ async function loadDailyRecapData(container, reload, filter) {
       }));
     }
     if (!document.body.contains(container)) return;
-    container.replaceChildren();
     const solarActual = document.querySelector('#solar-actual-today');
     if (solarActual) {
       const solarRow = recap.rows.find(row => row.label === 'Zonnepanelen');
@@ -671,7 +764,14 @@ async function loadDailyRecapData(container, reload, filter) {
           container.append(warning);
         }
         warning.textContent = `Verversen mislukt: ${error.message}`;
-      } else container.replaceChildren(element('p', 'energy-warning', error.message));
+      } else {
+        let errorMessage = container.querySelector('.daily-recap-load-error');
+        if (!errorMessage) {
+          errorMessage = element('p', 'energy-warning daily-recap-load-error');
+          container.append(errorMessage);
+        }
+        errorMessage.textContent = error.message;
+      }
     }
   }
 }
@@ -681,22 +781,59 @@ function renderDailyRecapRows(container, rows, recap, showUpdatedThrough = true)
   const signature = JSON.stringify({ rows, source: recap.source, updatedThrough: recap.updatedThrough, showUpdatedThrough });
   if (container.dataset.recapSignature === signature) return;
   container.dataset.recapSignature = signature;
-  container.replaceChildren();
   if (!rows.length) {
-    container.append(element('p', 'empty-state', 'Koppel passende meters om dagtotalen te tonen.'));
+    container.querySelector('.daily-recap-list')?.remove();
+    container.querySelector('.daily-recap-warning')?.remove();
+    container.querySelector('.daily-recap-updated')?.remove();
+    let empty = container.querySelector('.daily-recap-empty');
+    if (!empty) {
+      empty = element('p', 'empty-state daily-recap-empty');
+      container.append(empty);
+    }
+    empty.textContent = 'Koppel passende meters om dagtotalen te tonen.';
     return;
   }
-  if (rows.some(row => row.value !== null && !row.complete)) container.append(element('p', 'energy-warning', 'Onvolledige schatting: er ontbreken meetpunten of er zitten lange gaten in de metingen.'));
-  const list = element('ul', 'daily-recap-list');
-  for (const row of rows) {
-    const item = element('li', 'daily-recap-row');
+  container.querySelector('.daily-recap-empty')?.remove();
+  const incomplete = rows.some(row => row.value !== null && !row.complete);
+  let warning = container.querySelector('.daily-recap-warning');
+  if (incomplete) {
+    if (!warning) {
+      warning = element('p', 'energy-warning daily-recap-warning');
+      container.prepend(warning);
+    }
+    warning.textContent = 'Onvolledige schatting: er ontbreken meetpunten of er zitten lange gaten in de metingen.';
+  } else warning?.remove();
+  let list = container.querySelector('.daily-recap-list');
+  if (!list) {
+    list = element('ul', 'daily-recap-list');
+    container.append(list);
+  }
+  const labels = new Set(rows.map(row => row.label));
+  for (const item of [...list.children]) if (!labels.has(item.dataset.rowLabel)) item.remove();
+  rows.forEach((row, index) => {
+    let item = [...list.children].find(child => child.dataset.rowLabel === row.label);
+    if (!item) {
+      item = element('li', 'daily-recap-row');
+      item.dataset.rowLabel = row.label;
+      item.append(element('span'), element('strong'));
+    }
+    const current = list.children[index];
+    if (current !== item) list.insertBefore(item, current ?? null);
     const value = row.value === null || row.value === undefined ? 'Niet beschikbaar'
       : `${new Intl.NumberFormat('nl-NL', { maximumFractionDigits: row.unit === 'm³' ? 3 : 2 }).format(row.value)} ${row.unit}${row.source === 'home-assistant' ? '' : ' (schatting)'}`;
-    item.append(element('span', '', row.label), element('strong', '', value));
-    list.append(item);
-  }
-  container.append(list);
-  if (showUpdatedThrough && recap.source === 'home-assistant' && recap.updatedThrough) container.append(element('p', 'muted', `Energie bijgewerkt t/m ${formatTime(recap.updatedThrough)}`));
+    item.firstElementChild.textContent = row.label;
+    item.lastElementChild.textContent = value;
+  });
+  const updatedThrough = showUpdatedThrough && recap.source === 'home-assistant' && recap.updatedThrough
+    ? `Energie bijgewerkt t/m ${formatTime(recap.updatedThrough)}` : '';
+  let updated = container.querySelector('.daily-recap-updated');
+  if (updatedThrough) {
+    if (!updated) {
+      updated = element('p', 'muted daily-recap-updated');
+      container.append(updated);
+    }
+    updated.textContent = updatedThrough;
+  } else updated?.remove();
 }
 
 function dailyRecapPanel() {
@@ -749,15 +886,24 @@ function roomCard(room, config, live, compact = false) {
   if (compact) card.append(element('span', 'room-floor', room.floor));
   const temperatures = element('div', 'room-temperatures');
   const current = element('div');
-  current.append(element('span', 'muted', 'Gemeten'), element('strong', 'room-current', reading?.currentC === null || reading?.currentC === undefined ? 'Niet beschikbaar' : `${number(reading.currentC)} °C`));
+  current.append(element('span', 'muted', 'Gemeten'), liveText('strong', 'room-current', () => {
+    const value = data.thermalReadings?.rooms?.find(item => item.id === room.id)?.currentC;
+    return value === null || value === undefined ? 'Niet beschikbaar' : `${number(value)} °C`;
+  }));
   const target = element('div');
-  target.append(element('span', 'muted', 'Kamerdoel'), element('strong', 'room-target', `${number(room.targetC)} °C`));
+  target.append(element('span', 'muted', 'Kamerdoel'), liveText('strong', 'room-target', () => {
+    const value = data.thermal?.rooms?.find(item => item.id === room.id)?.targetC;
+    return Number.isFinite(value) ? `${number(value)} °C` : 'Niet beschikbaar';
+  }));
   const controls = element('div', 'room-target-controls');
   const adjustTarget = async delta => {
-    const nextTarget = Math.max(12, Math.min(26, Math.round((room.targetC + delta) * 2) / 2));
-    if (nextTarget === room.targetC) return;
-    const nextConfig = structuredClone(config);
-    const targetRoom = nextConfig.rooms.find(r => r.id === room.id);
+    const currentConfig = data.thermal;
+    const currentRoom = currentConfig?.rooms.find(item => item.id === room.id);
+    if (!currentRoom) return;
+    const nextTarget = Math.max(12, Math.min(26, Math.round((currentRoom.targetC + delta) * 2) / 2));
+    if (nextTarget === currentRoom.targetC) return;
+    const nextConfig = structuredClone(currentConfig);
+    const targetRoom = nextConfig.rooms.find(item => item.id === room.id);
     if (targetRoom) {
       targetRoom.targetC = nextTarget;
       try {
@@ -779,42 +925,69 @@ function roomCard(room, config, live, compact = false) {
   plus.classList.add('target-step-btn');
   controls.append(minus, plus);
   target.append(controls);
-  if (reading?.thermostatTargetC !== null && reading?.thermostatTargetC !== undefined) {
+  const hasThermostatTarget = Boolean(room.temperatureEntity && data.entities.find(item => item.id === room.temperatureEntity)?.domain === 'climate') || room.sourceIds.some(id => data.entities.find(item => item.id === config.sources.find(source => source.id === id)?.entityId)?.domain === 'climate');
+  if (hasThermostatTarget) {
     const thermRow = element('div', 'room-thermostat-sync');
-    thermRow.append(element('small', 'muted', `Thermostaat: ${number(reading.thermostatTargetC)} °C`));
-    if (Math.abs(reading.thermostatTargetC - room.targetC) >= 0.25) {
-      const syncBtn = element('button', 'link-button room-sync-btn', 'Overnemen');
-      syncBtn.type = 'button';
-      syncBtn.title = `Kamerdoel instellen op de thermostaatwaarde (${number(reading.thermostatTargetC)} °C)`;
-      syncBtn.addEventListener('click', async () => {
-        const nextConfig = structuredClone(config);
-        const targetRoom = nextConfig.rooms.find(r => r.id === room.id);
-        if (targetRoom) {
-          targetRoom.targetC = reading.thermostatTargetC;
-          try {
-            await api('thermal', { method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-Gridnest-Confirm-Control': 'true' }, body: JSON.stringify(nextConfig) });
-            notify(`Kamerdoel ${room.name} overgenomen van thermostaat (${number(reading.thermostatTargetC)} °C).`);
-            await refresh();
-          } catch (err) { notify(err.message, true); }
-        }
+    thermRow.append(liveText('small', 'muted', () => {
+      const value = data.thermalReadings?.rooms?.find(item => item.id === room.id)?.thermostatTargetC;
+      return value === null || value === undefined ? 'Thermostaatdoel niet beschikbaar' : `Thermostaat: ${number(value)} °C`;
+    }));
+    const syncBtn = element('button', 'link-button room-sync-btn', 'Overnemen');
+    syncBtn.type = 'button';
+    bindLive(syncBtn, () => {
+      const current = data.thermalReadings?.rooms?.find(item => item.id === room.id)?.thermostatTargetC;
+      const targetC = data.thermal?.rooms.find(item => item.id === room.id)?.targetC;
+      syncBtn.hidden = !Number.isFinite(current) || Math.abs(current - targetC) < 0.25;
+      syncBtn.title = Number.isFinite(current) ? `Kamerdoel instellen op de thermostaatwaarde (${number(current)} °C)` : 'Thermostaatdoel niet beschikbaar';
+    });
+    syncBtn.addEventListener('click', async () => {
+      const current = data.thermalReadings?.rooms?.find(item => item.id === room.id)?.thermostatTargetC;
+      const nextConfig = structuredClone(data.thermal);
+      const targetRoom = nextConfig.rooms.find(item => item.id === room.id);
+      if (!targetRoom || !Number.isFinite(current)) return;
+      targetRoom.targetC = current;
+      try {
+        await saveThermal(nextConfig, true);
+        notify(`Kamerdoel ${room.name} overgenomen van thermostaat (${number(current)} °C).`);
+      } catch (err) { notify(err.message, true); }
       });
-      thermRow.append(syncBtn);
-    }
+    thermRow.append(syncBtn);
     target.append(thermRow);
   }
   temperatures.append(current, target);
   const labels = { missing: 'Geen meting', below: 'Onder doel', above: 'Boven doel', 'at-target': 'Op temperatuur' };
-  card.append(header, temperatures, element('span', `room-status status-${reading?.status ?? 'missing'}`, labels[reading?.status ?? 'missing']));
+  const status = liveText('span', `room-status status-${reading?.status ?? 'missing'}`, () => {
+    const value = data.thermalReadings?.rooms?.find(item => item.id === room.id)?.status ?? 'missing';
+    return labels[value] ?? labels.missing;
+  });
+  bindLive(status, () => {
+    const value = data.thermalReadings?.rooms?.find(item => item.id === room.id)?.status ?? 'missing';
+    status.className = `room-status status-${value}`;
+    status.textContent = labels[value] ?? labels.missing;
+  });
+  card.append(header, temperatures, status);
   const solarPlan = data.controlStatus?.decisions?.find(decision => decision.origin === 'thermal' && config.sources.some(source => source.id === decision.sourceId && source.controlRoomId === room.id) && decision.targetC > room.targetC);
-  if (solarPlan) card.append(element('p', 'solar-target', `Zonnedoel: ${number(solarPlan.targetC)} °C`));
-  if (room.presenceEntity && reading?.occupied !== null && reading?.occupied !== undefined) card.append(element('span', 'room-presence', reading.occupied ? 'Aanwezig' : 'Afwezig'));
+  if (solarPlan) card.append(liveText('p', 'solar-target', () => {
+    const decision = data.controlStatus?.decisions?.find(item => item.origin === 'thermal' && item.roomName === room.name && item.targetC > (data.thermal?.rooms.find(value => value.id === room.id)?.targetC ?? 0));
+    return decision ? `Zonnedoel: ${number(decision.targetC)} °C` : '';
+  }));
+  if (room.presenceEntity || data.preferences.presenceEntities?.length) card.append(liveText('span', 'room-presence', () => {
+    const occupied = data.thermalReadings?.rooms?.find(item => item.id === room.id)?.occupied;
+    return occupied === null || occupied === undefined ? 'Onbekend' : occupied ? 'Aanwezig' : 'Afwezig';
+  }));
+  if (room.sourceIds.some(id => config.sources.find(source => source.id === id)?.solar?.enabled)) card.append(liveText('p', 'solar-target', () => {
+    const targetC = data.controlStatus?.decisions?.find(decision => decision.origin === 'thermal' && decision.roomName === room.name && decision.targetC > (data.thermal?.rooms.find(value => value.id === room.id)?.targetC ?? 0))?.targetC;
+    return Number.isFinite(targetC) ? `Zonnedoel: ${number(targetC)} °C` : '';
+  }));
   const sources = element('ul', 'room-sources');
   for (const id of room.sourceIds) {
     const source = config.sources.find(item => item.id === id);
-    const measurement = live.sources.find(item => item.id === id);
     if (!source) continue;
     const row = element('li');
-    row.append(element('span', '', source.name), element('span', 'muted', climateStatus(measurement ?? {})));
+    row.append(element('span', '', source.name), liveText('span', 'muted', () => {
+      const current = data.thermalReadings?.sources?.find(item => item.id === id);
+      return climateStatus(current ?? {});
+    }));
     sources.append(row);
   }
   if (!room.sourceIds.length) sources.append(element('li', 'muted', 'Geen warmtebron gekoppeld'));
@@ -829,7 +1002,7 @@ function heatOverview() {
   section.setAttribute('aria-label', 'Warmteoverzicht');
   const header = element('div', 'section-heading');
   const actions = element('div', 'rule-tools');
-  actions.append(element('span', 'tag', { off: 'UIT', preview: 'PROEFMODUS', active: 'ACTIEF' }[config.mode] ?? 'UIT'), toolButton('arrow-up-right', 'Warmte openen', () => navigate('thermal')));
+  actions.append(liveText('span', 'tag', () => ({ off: 'UIT', preview: 'PROEFMODUS', active: 'ACTIEF' }[data.thermal?.mode] ?? 'UIT')), toolButton('arrow-up-right', 'Warmte openen', () => navigate('thermal')));
   header.append(element('h2', '', 'Warmte in huis'), actions);
   section.append(header);
   const grid = element('div', 'heat-overview-grid');
@@ -897,23 +1070,41 @@ function thermal() {
   sourceSection.append(sourceHeader);
   for (const source of config.sources) {
     const row = element('div', 'heat-source-row');
+    row.dataset.sourceId = source.id;
     const text = element('div');
     const profile = data.heatingProfiles?.find(profile => profile.id === source.profile);
     const rooms = config.rooms.filter(room => room.sourceIds.includes(source.id));
-    text.append(element('strong', '', source.name), element('small', '', `${profile?.name ?? 'Geen profiel'} · ${rooms.length} ${rooms.length === 1 ? 'kamer' : 'kamers'}`));
+    text.append(element('strong', '', source.name), liveText('small', '', () => {
+      const current = data.thermal?.sources.find(item => item.id === source.id);
+      const liveSource = data.thermalReadings?.sources.find(item => item.id === source.id);
+      return `${data.heatingProfiles?.find(item => item.id === current?.profile)?.name ?? 'Geen profiel'} · ${rooms.length} ${rooms.length === 1 ? 'kamer' : 'kamers'} · ${climateStatus(liveSource ?? {})}`;
+    }));
     row.append(icon('heater'), text, toolButton('pencil', `${source.name} bewerken`, () => editThermal('source', source.id)));
     sourceSection.append(row);
   }
   if (!config.sources.length) sourceSection.append(element('p', 'empty-state', 'Nog geen warmtebronnen.'));
   main.append(sourceSection);
   const statusSection = element('section', 'rule-status'); statusSection.append(element('h2', '', 'Warmtebeoordeling'));
-  if ((config.mode ?? 'off') === 'off') statusSection.append(element('p', 'muted', 'Warmteregelaar staat uit.'));
-  if (data.controlStatus?.error) statusSection.append(element('p', 'energy-warning', data.controlStatus.error));
+  const offStatus = liveText('p', 'muted', () => data.thermal?.mode === 'off' ? 'Warmteregelaar staat uit.' : '');
+  bindLive(offStatus, () => { offStatus.hidden = data.thermal?.mode !== 'off'; offStatus.textContent = 'Warmteregelaar staat uit.'; });
+  statusSection.append(offStatus);
+  const thermalError = liveText('p', 'energy-warning', () => data.controlStatus?.error ?? '');
+  bindLive(thermalError, () => { thermalError.hidden = !data.controlStatus?.error; thermalError.textContent = data.controlStatus?.error ?? ''; });
+  statusSection.append(thermalError);
   for (const decision of data.controlStatus?.decisions?.filter(decision => decision.origin === 'thermal') ?? []) {
     const row = element('div', 'decision-row'); const text = element('div');
-    text.append(element('strong', '', decision.name), element('p', 'subtitle', decision.reason));
+    text.append(element('strong', '', decision.name), liveText('p', 'subtitle', () => data.controlStatus?.decisions?.find(item => item.id === decision.id)?.reason ?? ''));
     const labels = { blocked: 'Geblokkeerd', stable: 'Op doel', planned: 'Gepland', sent: 'Verzonden', waiting: 'Wachten', paused: 'Gepauzeerd' };
-    row.append(text, element('span', `room-status decision-${decision.status}`, labels[decision.status] ?? decision.status)); statusSection.append(row);
+    const decisionStatus = liveText('span', `room-status decision-${decision.status}`, () => {
+      const current = data.controlStatus?.decisions?.find(item => item.id === decision.id);
+      return labels[current?.status] ?? current?.status ?? '';
+    });
+    bindLive(decisionStatus, () => {
+      const current = data.controlStatus?.decisions?.find(item => item.id === decision.id);
+      decisionStatus.className = `room-status decision-${current?.status ?? 'blocked'}`;
+      decisionStatus.textContent = labels[current?.status] ?? current?.status ?? '';
+    });
+    row.append(text, decisionStatus); statusSection.append(row);
   }
   main.append(statusSection);
 }
@@ -1197,19 +1388,52 @@ async function saveRules(control, confirmActive = false) {
 function updateRuleStatus() {
   const container = document.querySelector('#rule-decisions');
   if (!container) return;
-  container.replaceChildren();
   const status = data.controlStatus;
-  if (status?.updatedAt) container.append(element('p', 'muted', `Laatste beoordeling: ${formatTime(status.updatedAt)}`));
-  if (status?.error) container.append(element('p', 'energy-warning', status.error));
-  if (data.control.mode === 'off') container.append(element('p', 'empty-state', 'Regelaar staat uit. Geen opdrachten worden uitgevoerd.'));
+  const findOrAdd = (selector, tag, className, parent = container) => {
+    let node = parent.querySelector(`:scope > ${selector}`);
+    if (!node) { node = element(tag, className); parent.append(node); }
+    return node;
+  };
+  const updated = findOrAdd('.rule-last-update', 'p', 'muted rule-last-update');
+  updated.hidden = !status?.updatedAt;
+  updated.textContent = status?.updatedAt ? `Laatste beoordeling: ${formatTime(status.updatedAt)}` : '';
+  const error = findOrAdd('.rule-live-error', 'p', 'energy-warning rule-live-error');
+  error.hidden = !status?.error;
+  error.textContent = status?.error ?? '';
+  const off = findOrAdd('.rule-live-off', 'p', 'empty-state rule-live-off');
+  off.hidden = data.control.mode !== 'off';
+  off.textContent = 'Regelaar staat uit. Geen opdrachten worden uitgevoerd.';
+  const rows = findOrAdd('.rule-live-rows', 'div', 'rule-live-rows');
   const labels = { blocked: 'Geblokkeerd', disabled: 'Uit', planned: 'Gepland', stable: 'Op doel', waiting: 'Wachten', paused: 'Gepauzeerd', sent: 'Verzonden' };
-  for (const decision of status?.decisions?.filter(decision => decision.origin !== 'thermal') ?? []) {
-    const row = element('div', 'decision-row');
-    const copy = element('div');
-    copy.append(element('strong', '', decision.name), element('small', 'muted', `Prioriteit ${decision.priority ?? 50}`), element('p', 'subtitle', decision.reason));
-    if (decision.command) copy.append(element('small', 'muted', `${decision.command.entityId} · ${decision.command.value ?? decision.command.service}`));
-    row.append(copy, element('span', `room-status decision-${decision.status}`, labels[decision.status] ?? decision.status));
-    container.append(row);
+  const decisions = status?.decisions?.filter(decision => decision.origin !== 'thermal') ?? [];
+  const liveIds = new Set(decisions.map(decision => decision.id));
+  for (const row of [...rows.children]) if (!liveIds.has(row.dataset.decisionId)) row.remove();
+  decisions.forEach((decision, index) => {
+    let row = [...rows.children].find(item => item.dataset.decisionId === decision.id);
+    if (!row) {
+      row = element('div', 'decision-row');
+      row.dataset.decisionId = decision.id;
+      const copy = element('div');
+      copy.append(element('strong', '', ''), element('small', 'muted', ''), element('p', 'subtitle', ''), element('small', 'muted', ''));
+      row.append(copy, element('span', 'room-status'));
+    }
+    const current = rows.children[index];
+    if (current !== row) rows.insertBefore(row, current ?? null);
+    const [name, priority, reason, command] = row.firstElementChild.children;
+    name.textContent = decision.name;
+    priority.textContent = `Prioriteit ${decision.priority ?? 50}`;
+    reason.textContent = decision.reason;
+    command.textContent = decision.command ? `${decision.command.entityId} · ${decision.command.value ?? decision.command.service}` : '';
+    command.hidden = !decision.command;
+    const badge = row.lastElementChild;
+    badge.className = `room-status decision-${decision.status}`;
+    badge.textContent = labels[decision.status] ?? decision.status;
+  });
+  if (!decisions.length) {
+    const empty = findOrAdd('.rule-live-empty', 'p', 'empty-state rule-live-empty', rows);
+    empty.textContent = data.control.rules.length ? 'Geen actuele beslissingen.' : 'Nog geen regels.';
+  } else {
+    rows.querySelector('.rule-live-empty')?.remove();
   }
 }
 
@@ -2161,11 +2385,20 @@ async function drawUtilityCharts(utility, status, entityId, reload = false) {
       const formatter = new Intl.DateTimeFormat('nl-NL', interval === 60 * 60 * 1000
         ? { timeZone: 'Europe/Amsterdam', hour: '2-digit', minute: '2-digit' }
         : { timeZone: 'Europe/Amsterdam', day: '2-digit', month: '2-digit' });
+      const labels = result.series[key].map(bucket => formatter.format(new Date(bucket.timestamp)));
+      const values = result.series[key].map(bucket => bucket.value !== null && bucket.value !== undefined ? bucket.value : 0);
+      const existing = utilityCharts.find(item => item.utility === utility && item.chart.canvas === canvas);
+      if (existing) {
+        existing.chart.data.labels = labels;
+        existing.chart.data.datasets[0].data = values;
+        existing.chart.update('none');
+        continue;
+      }
       utilityCharts.push({ utility, chart: new Chart(canvas, {
         type: 'line',
         data: {
-          labels: result.series[key].map(bucket => formatter.format(new Date(bucket.timestamp))),
-          datasets: [{ label: `${utility === 'gas' ? 'Gas' : 'Water'}verbruik`, data: result.series[key].map(bucket => (bucket.value !== null && bucket.value !== undefined ? bucket.value : 0)), borderColor: color,
+          labels,
+          datasets: [{ label: `${utility === 'gas' ? 'Gas' : 'Water'}verbruik`, data: values, borderColor: color,
             backgroundColor: `${color}24`, borderWidth: 2, pointRadius: key === 'hours24' ? 2 : 1.5,
             pointHoverRadius: 5, tension: 0.25, fill: true, spanGaps: true }]
         },
@@ -2183,7 +2416,10 @@ async function drawUtilityCharts(utility, status, entityId, reload = false) {
   } catch (error) {
     if (document.body.contains(status)) {
       status.textContent = error.message;
-      status.parentElement.querySelectorAll('[data-utility-total]').forEach(label => { label.textContent = 'Niet beschikbaar'; });
+      status.parentElement.querySelectorAll('[data-utility-total]').forEach(label => {
+        const total = utilityHistoryCache[`${utility}:${entityId}`]?.totals?.[label.dataset.utilityTotal];
+        if (!total) label.textContent = 'Niet beschikbaar';
+      });
     }
   }
 }
@@ -2199,17 +2435,6 @@ function utilityPanel(utility) {
   if (entityId) {
     const reload = toolButton('refresh-cw', `${label}historie vernieuwen`, () => {
       const status = section.querySelector('.utility-history-status');
-      for (const item of utilityCharts.filter(item => item.utility === utility)) item.chart.destroy();
-      utilityCharts = utilityCharts.filter(item => item.utility !== utility);
-      section.querySelectorAll('.utility-chart canvas').forEach(canvas => {
-        const replacement = document.createElement('canvas');
-        replacement.dataset.utilityChart = canvas.dataset.utilityChart;
-        replacement.dataset.utility = utility;
-        replacement.setAttribute('role', 'img');
-        replacement.setAttribute('aria-label', canvas.getAttribute('aria-label'));
-        canvas.replaceWith(replacement);
-      });
-      status.textContent = 'Historie vernieuwen…';
       drawUtilityCharts(utility, status, entityId, true);
     });
     header.append(reload);
@@ -2262,14 +2487,19 @@ function singleBatteryPanel(batConfig) {
   const actualSwitchEntity = usesBatterySpecificSwitch
     ? switchEntity
     : data.entities.find(e => e.id === data.mappings.batteryEnable) || (data.demo ? switchEntity : null);
+  const getSwitchEntity = () => {
+    const id = usesBatterySpecificSwitch ? batConfig.switchEntity : data.mappings.batteryEnable || (data.demo ? batConfig.switchEntity : null);
+    return data.entities.find(entity => entity.id === id);
+  };
+  const switchStateLabel = () => {
+    const entity = getSwitchEntity();
+    return !entity ? 'Geen schakelaar' : !entity.available ? 'Niet beschikbaar'
+      : entity.state === 'on' ? 'Aan' : entity.state === 'off' ? 'Uit' : 'Onbekend';
+  };
 
   const header = element('header', 'appliance-header');
   const copy = element('div');
-  const switchState = !actualSwitchEntity ? 'Geen schakelaar'
-    : !actualSwitchEntity.available ? 'Niet beschikbaar'
-      : actualSwitchEntity.state === 'on' ? 'Aan'
-        : actualSwitchEntity.state === 'off' ? 'Uit' : 'Onbekend';
-  copy.append(element('h2', '', batConfig.name || 'Thuisbatterij'), element('span', 'appliance-status', switchState));
+  copy.append(element('h2', '', batConfig.name || 'Thuisbatterij'), liveText('span', 'appliance-status', switchStateLabel));
   header.append(icon('battery-charging'), copy);
   panel.append(header);
 
@@ -2278,30 +2508,44 @@ function singleBatteryPanel(batConfig) {
   visual.setAttribute('aria-label', batConfig.name || 'Thuisbatterij');
   const housing = element('div', 'appliance-housing');
   const face = element('div', 'appliance-face');
-  const socVal = socEntity?.available && Number.isFinite(Number(socEntity.state)) ? Math.round(Number(socEntity.state)) : null;
   const fill = element('div', 'battery-fill');
-  fill.style.height = `${socVal !== null ? Math.max(0, Math.min(100, socVal)) : 0}%`;
+  bindLive(fill, () => {
+    const entity = data.entities.find(item => item.id === batConfig.socEntity);
+    const value = entity?.available && Number.isFinite(Number(entity.state)) ? Number(entity.state) : null;
+    fill.style.height = `${value === null ? 0 : Math.max(0, Math.min(100, value))}%`;
+  });
   face.append(fill);
   housing.prepend(face);
   visual.append(housing);
   panel.append(visual);
 
-  panel.append(element('strong', 'battery-charge', socVal !== null ? `${number(socVal)} %` : 'Niet beschikbaar'));
+  panel.append(liveText('strong', 'battery-charge', () => {
+    const entity = data.entities.find(item => item.id === batConfig.socEntity);
+    return entity?.available && Number.isFinite(Number(entity.state)) ? `${number(Math.round(Number(entity.state)))} %` : 'Niet beschikbaar';
+  }));
 
   if (actualSwitchEntity) {
-    const isEnabled = actualSwitchEntity.state === 'on';
     const section = element('section', 'battery-control-section');
-    const toggle = element('button', 'primary-button', isEnabled ? 'Accu uitschakelen' : 'Accu inschakelen');
-    toggle.prepend(icon(isEnabled ? 'pause' : 'play'));
-    toggle.disabled = !data.controlStatus?.activeAllowed || !actualSwitchEntity.available || !['on', 'off'].includes(actualSwitchEntity.state);
+    const toggle = element('button', 'primary-button');
+    const toggleIcon = icon('play');
+    const toggleLabel = liveText('span', '', () => getSwitchEntity()?.state === 'on' ? 'Accu uitschakelen' : 'Accu inschakelen');
+    toggle.append(toggleIcon, toggleLabel);
+    bindLive(toggle, () => {
+      const entity = getSwitchEntity();
+      const enabled = entity?.state === 'on';
+      toggleIcon.dataset.lucide = enabled ? 'pause' : 'play';
+      toggle.disabled = !data.controlStatus?.activeAllowed || !entity?.available || !['on', 'off'].includes(entity?.state);
+    });
     toggle.addEventListener('click', async () => {
-      const targetEnabled = !isEnabled;
+      const currentSwitch = getSwitchEntity();
+      if (!currentSwitch || !['on', 'off'].includes(currentSwitch.state)) return;
+      const targetEnabled = currentSwitch.state !== 'on';
       try {
         if (usesBatterySpecificSwitch) {
           await api(`batteries/${encodeURIComponent(batConfig.id)}/enable`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ switchId: actualSwitchEntity.id, enabled: targetEnabled, expectedState: actualSwitchEntity.state, confirm: true })
+            body: JSON.stringify({ switchId: currentSwitch.id, enabled: targetEnabled, expectedState: currentSwitch.state, confirm: true })
           });
         } else {
           await api('battery/enable', {
@@ -2331,7 +2575,7 @@ function singleBatteryPanel(batConfig) {
   const tiles = element('div', 'appliance-measurements');
   const metric = (title, value) => {
     const cell = element('div', 'appliance-measurement');
-    cell.append(element('span', '', title), element('strong', '', value));
+    cell.append(element('span', '', title), value instanceof Node ? value : element('strong', '', value));
     return cell;
   };
 
@@ -2341,11 +2585,15 @@ function singleBatteryPanel(batConfig) {
     return `${number(Number(ent.state))} ${ent.unit || ''}`.trim();
   };
 
+  const entityValue = key => {
+    const entityId = batConfig[key];
+    return formatEntityVal(data.entities.find(item => item.id === entityId));
+  };
   tiles.append(
-    metric('Input', formatEntityVal(inputEntity)),
-    metric('Output', formatEntityVal(outputEntity)),
-    metric('Resterende tijd', formatEntityVal(remainingEntity)),
-    metric('State of health', formatEntityVal(healthEntity))
+    metric('Input', liveText('strong', '', () => entityValue('inputEntity'))),
+    metric('Output', liveText('strong', '', () => entityValue('outputEntity'))),
+    metric('Resterende tijd', liveText('strong', '', () => entityValue('remainingEntity'))),
+    metric('State of health', liveText('strong', '', () => entityValue('healthEntity')))
   );
   panel.append(tiles);
 
@@ -2353,12 +2601,16 @@ function singleBatteryPanel(batConfig) {
   limits.append(element('h3', 'charger-phase-heading', 'Batterijniveaus (min / max %)'));
   const limitsGrid = element('div', 'battery-limits-grid');
   const inputs = {};
+  const reportedValues = {};
+  const pendingValues = {};
   for (const [key, title, fallbackVal] of [['min', 'Minimum niveau (%)', '20'], ['max', 'Maximum niveau (%)', '80']]) {
     const entityId = batConfig[`${key}LevelEntity`];
     const entity = data.entities.find(item => item.id === entityId);
     const label = element('label', 'mapping-setting');
     const input = element('input', 'text-input');
     const curVal = entity?.state && Number.isFinite(Number(entity.state)) ? Number(entity.state) : (data.demo ? Number(fallbackVal) : '');
+    reportedValues[key] = String(curVal);
+    pendingValues[key] = null;
     Object.assign(input, {
       type: 'number',
       min: Math.max(0, entity?.minimum ?? 0),
@@ -2367,6 +2619,26 @@ function singleBatteryPanel(batConfig) {
       required: true,
       value: curVal,
       placeholder: entity ? `${entity.name}` : `${fallbackVal}% (niet gekoppeld)`
+    });
+    bindLive(input, () => {
+      if (limits.contains(document.activeElement)) return;
+      const current = data.entities.find(item => item.id === entityId);
+      if (!current?.available || !Number.isFinite(Number(current.state))) return;
+      const currentValue = String(Number(current.state));
+      if (pendingValues[key] !== null) {
+        if (currentValue === pendingValues[key]) {
+          reportedValues[key] = currentValue;
+          pendingValues[key] = null;
+        }
+        return;
+      }
+      if (String(input.value) === reportedValues[key]) {
+        input.value = currentValue;
+        reportedValues[key] = currentValue;
+      }
+    });
+    input.addEventListener('input', () => {
+      if (pendingValues[key] !== null && input.value !== pendingValues[key]) pendingValues[key] = null;
     });
     const canControl = Boolean(entity?.available && entity.domain === 'number' && data.controlStatus?.activeAllowed && data.control?.mode === 'active');
     input.disabled = !canControl && !data.demo;
@@ -2397,6 +2669,8 @@ function singleBatteryPanel(batConfig) {
     apply.disabled = true;
     try {
       await api('battery/levels', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ batteryId: batConfig.id, min: Number(inputs.min.value), max: Number(inputs.max.value), confirm: true }) });
+      pendingValues.min = String(Number(inputs.min.value));
+      pendingValues.max = String(Number(inputs.max.value));
       notify('Batterijniveaus verstuurd; terugmelding volgt.');
       await refresh();
     } catch (error) { notify(error.message, true); apply.disabled = false; }
@@ -2404,8 +2678,10 @@ function singleBatteryPanel(batConfig) {
   panel.append(limits);
 
   if (powerEntity) {
-    const actual = batteryInfo(batConfig);
-    panel.append(element('p', 'appliance-footer', `Batterijvermogen · ${powerText(actual.powerW === null ? null : actual.powerW / 1000)}`));
+    panel.append(liveText('p', 'appliance-footer', () => {
+      const power = batteryInfo(batConfig).powerW;
+      return `Batterijvermogen · ${powerText(power === null ? null : power / 1000)}`;
+    }));
   }
 
   return panel;
@@ -2465,7 +2741,7 @@ function devicePanel(kind) {
   const header = element('header', 'appliance-header');
   const copy = element('div');
   copy.append(element('h2', '', entity?.name.split(' · ')[0] || (battery ? 'Thuisbatterij' : 'Laadpaal')),
-    element('span', 'appliance-status', battery ? measurement('batteryEnable') : measurement('evCableStatus')));
+    liveText('span', 'appliance-status', () => battery ? measurement('batteryEnable') : measurement('evCableStatus')));
   header.append(icon(battery ? 'battery-charging' : 'car'), copy);
   panel.append(header);
   const visual = element('div', `appliance-visual ${battery ? 'battery-visual' : 'charger-visual'}`);
@@ -2488,7 +2764,8 @@ function devicePanel(kind) {
   const tiles = element('div', 'appliance-measurements');
   const metric = (title, value) => {
     const cell = element('div', 'appliance-measurement');
-    cell.append(element('span', '', title), element('strong', '', value));
+    const valueNode = typeof value === 'function' ? liveText('strong', '', value) : element('strong', '', value);
+    cell.append(element('span', '', title), valueNode);
     return cell;
   };
   if (battery) {
@@ -2498,11 +2775,11 @@ function devicePanel(kind) {
       tiles.append(metric(title, measurement(role)));
     }
     panel.append(tiles);
-    if (data.mappings.batteryPower) panel.append(element('p', 'appliance-footer', `Batterijvermogen · ${measurement('batteryPower')}`));
+    if (data.mappings.batteryPower) panel.append(liveText('p', 'appliance-footer', () => `Batterijvermogen · ${measurement('batteryPower')}`));
   } else {
     const allowed = data.controlStatus?.activeAllowed;
-    const enabled = data.readings.find(item => item.role === 'evEnable');
-    const lock = data.readings.find(item => item.role === 'evLockStatus');
+    const currentEnable = () => data.readings.find(item => item.role === 'evEnable');
+    const currentLock = () => data.readings.find(item => item.role === 'evLockStatus');
     const executeCommand = async (command, successMsg) => {
       try {
         await api('ev/control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...command, confirm: true }) });
@@ -2541,22 +2818,41 @@ function devicePanel(kind) {
     const lockControl = element('div', 'charger-lock-control');
     const lockEntity = data.entities.find(item => item.id === data.mappings.evLockStatus);
     const lockStates = lockEntity?.domain === 'switch' ? ['on', 'off'] : ['locked', 'unlocked'];
-    const locked = lockStates.includes(lock?.value) && lock.value === lockStates[0];
-    const lockButton = toolButton('lock', locked ? 'Kabel ontgrendelen' : 'Kabel vergrendelen', () => confirmCommand(locked ? 'Kabel ontgrendelen' : 'Kabel vergrendelen', { action: 'lock', locked: !locked }));
-    lockButton.disabled = !allowed || !['switch', 'lock'].includes(lockEntity?.domain);
+    const lockButton = toolButton('lock', 'Kabelvergrendeling wijzigen', () => {
+      const reading = currentLock();
+      const locked = lockStates.includes(reading?.value) && reading.value === lockStates[0];
+      confirmCommand(locked ? 'Kabel ontgrendelen' : 'Kabel vergrendelen', { action: 'lock', locked: !locked });
+    });
+    bindLive(lockButton, () => {
+      const reading = currentLock();
+      const locked = lockStates.includes(reading?.value) && reading.value === lockStates[0];
+      const label = locked ? 'Kabel ontgrendelen' : 'Kabel vergrendelen';
+      lockButton.title = label;
+      lockButton.setAttribute('aria-label', label);
+      lockButton.disabled = !data.controlStatus?.activeAllowed || !['switch', 'lock'].includes(lockEntity?.domain);
+    });
     lockControl.append(lockButton, element('span', '', 'Kabelvergrendeling'));
     panel.append(lockControl);
-    const charging = enabled?.value === 'on';
-    const start = element('button', 'primary-button appliance-command', charging ? 'Laden stoppen' : 'Laden starten');
-    start.prepend(icon(charging ? 'pause' : 'play'));
-    const cable = data.readings.find(item => item.role === 'evCableStatus');
-    start.disabled = !allowed || !enabled?.valid || (!charging && (!cable?.valid || cable.value !== 'on'));
-    start.addEventListener('click', () => confirmCommand(charging ? 'Laden stoppen' : 'Laden starten', { action: 'enable', enabled: !charging }));
+    const start = element('button', 'primary-button appliance-command');
+    const startLabel = liveText('span', '', () => currentEnable()?.value === 'on' ? 'Laden stoppen' : 'Laden starten');
+    start.append(icon('play'), startLabel);
+    bindLive(start, () => {
+      const enabled = currentEnable();
+      const cable = data.readings.find(item => item.role === 'evCableStatus');
+      start.disabled = !data.controlStatus?.activeAllowed || !enabled?.valid || (enabled.value !== 'on' && (!cable?.valid || cable.value !== 'on'));
+    });
+    start.addEventListener('click', () => {
+      const charging = currentEnable()?.value === 'on';
+      confirmCommand(charging ? 'Laden stoppen' : 'Laden starten', { action: 'enable', enabled: !charging });
+    });
     panel.append(start);
     const limit = data.entities.find(item => item.id === data.mappings.evCurrentLimit);
     const limitLabel = element('label', 'charger-limit-control');
     limitLabel.htmlFor = 'ev-current-slider';
-    const value = element('strong', '', limit?.available ? `${number(Number(limit.state))} A` : 'Niet gekoppeld');
+    const value = liveText('strong', '', () => {
+      const current = data.entities.find(item => item.id === data.mappings.evCurrentLimit);
+      return current?.available ? `${number(Number(current.state))} A` : 'Niet gekoppeld';
+    });
     limitLabel.append(element('span', '', 'Laadlimiet'), value);
     const slider = element('input');
     slider.id = 'ev-current-slider';
@@ -2566,6 +2862,21 @@ function devicePanel(kind) {
     slider.step = limit?.step || 1;
     slider.value = limit?.state ?? slider.min;
     slider.disabled = !allowed || !limit?.available || !Number.isFinite(limit.minimum) || !Number.isFinite(limit.maximum) || !Number.isFinite(limit.step) || limit.step <= 0 || Number(slider.min) > Number(slider.max);
+    bindLive(value, () => {
+      if (document.activeElement === slider) return;
+      const current = data.entities.find(item => item.id === data.mappings.evCurrentLimit);
+      value.textContent = current?.available ? `${number(Number(current.state))} A` : 'Niet gekoppeld';
+    });
+    bindLive(slider, () => {
+      const current = data.entities.find(item => item.id === data.mappings.evCurrentLimit);
+      if (document.activeElement !== slider && current?.available) slider.value = current.state;
+      if (current) {
+        slider.min = Math.max(6, current.minimum ?? 6);
+        slider.max = Math.min(32, current.maximum ?? 16);
+        slider.step = current.step || 1;
+      }
+      slider.disabled = !data.controlStatus?.activeAllowed || !current?.available || !Number.isFinite(current?.minimum) || !Number.isFinite(current?.maximum) || !Number.isFinite(current?.step) || current.step <= 0 || Number(slider.min) > Number(slider.max);
+    });
     slider.addEventListener('input', () => { value.textContent = `${number(Number(slider.value))} A`; });
     slider.addEventListener('change', () => confirmCommand(`Laadlimiet ${number(Number(slider.value))} A instellen`, { action: 'current', value: Number(slider.value) }, () => {
       slider.value = limit.state;
@@ -2573,13 +2884,13 @@ function devicePanel(kind) {
     }));
     limitLabel.append(slider);
     panel.append(limitLabel);
-    tiles.append(metric('Vermogen', measurement('evPower')), metric('Sessie', measurement('evSessionEnergy')));
-    if (data.mappings.evSoc) tiles.append(metric('Auto-accu', measurement('evSoc')));
+    tiles.append(metric('Vermogen', () => measurement('evPower')), metric('Sessie', () => measurement('evSessionEnergy')));
+    if (data.mappings.evSoc) tiles.append(metric('Auto-accu', () => measurement('evSoc')));
     panel.append(tiles, element('h3', 'charger-phase-heading', 'Laadstroom per fase'));
     const phases = element('div', 'charger-phases');
     for (const phase of [1, 2, 3]) {
       const role = `evPhase${phase}Current`;
-      const phaseCell = metric(`L${phase}`, measurement(role));
+      const phaseCell = metric(`L${phase}`, () => measurement(role));
       const reading = data.readings.find(item => item.role === role);
       const meter = element('meter');
       meter.min = 0;
@@ -2587,11 +2898,17 @@ function devicePanel(kind) {
       meter.value = reading?.valid ? Number(reading.value) : 0;
       meter.setAttribute('aria-label', `Gemeten laadstroom L${phase}`);
       if (!reading?.valid) meter.hidden = true;
+      bindLive(meter, () => {
+        const current = data.readings.find(item => item.role === role);
+        meter.hidden = !current?.valid;
+        meter.value = current?.valid ? Number(current.value) : 0;
+        meter.max = Math.max(32, Number(current?.value) || 0);
+      });
       phaseCell.append(meter);
       phases.append(phaseCell);
     }
     panel.append(phases);
-    const footer = element('p', 'appliance-footer', measurement('evLockStatus'));
+    const footer = liveText('p', 'appliance-footer', () => measurement('evLockStatus'));
     footer.prepend(icon('lock'));
     panel.append(footer);
     if (!allowed) panel.append(element('p', 'appliance-control-note', 'Handmatige bediening vereist vrijgave voor echte apparaatsturing.'));
@@ -2629,27 +2946,40 @@ async function loadSolarChart(panel, reload = false) {
       : data.mappings.solarToday && !cumulative && data.energy?.solarOutlook?.actualTodayKwh === null ? 'De gekoppelde dagopbrengst is niet beschikbaar.'
       : !row || row.energyKwh === null ? 'Geen opbrengsthistorie beschikbaar.'
         : !row.complete ? 'De uurgrafiek is onvolledig: er ontbreken meetpunten.' : '';
+    const periods = row?.periods ?? [];
+    const labels = Array.from({ length: 48 }, (_, index) => `${String(Math.floor(index / 2)).padStart(2, '0')}:${index % 2 ? '30' : '00'}`);
+    const values = Array.from({ length: 48 }, (_, index) => periods.find(bucket => bucket.index === index)?.energyKwh ?? null);
+    const labelFor = context => `${solarEnergyText(context.parsed.y)}${periods.find(bucket => bucket.index === context.dataIndex)?.complete ? '' : ' (schatting)'}`;
+    const colors = getComputedStyle(document.documentElement);
+    const mutedColor = colors.getPropertyValue('--appliance-muted').trim();
+    const outlineColor = colors.getPropertyValue('--appliance-outline').trim();
+    const accentColor = colors.getPropertyValue('--appliance-accent').trim();
     const canvas = panel.querySelector('canvas');
     const previous = utilityCharts.find(item => item.chart.canvas === canvas);
     if (previous) {
-      previous.chart.destroy();
-      utilityCharts = utilityCharts.filter(item => item !== previous);
+      previous.chart.data.labels = labels;
+      previous.chart.data.datasets[0].data = values;
+      previous.chart.data.datasets[0].backgroundColor = accentColor;
+      previous.chart.options.plugins.tooltip.callbacks.label = labelFor;
+      previous.chart.options.scales.x.border.color = outlineColor;
+      previous.chart.options.scales.x.ticks.color = mutedColor;
+      previous.chart.update('none');
+      return;
     }
-    const periods = row?.periods ?? [];
     const chart = new Chart(canvas, {
       type: 'bar',
       data: {
-        labels: Array.from({ length: 48 }, (_, index) => `${String(Math.floor(index / 2)).padStart(2, '0')}:${index % 2 ? '30' : '00'}`),
-        datasets: [{ data: Array.from({ length: 48 }, (_, index) => periods.find(bucket => bucket.index === index)?.energyKwh ?? null), backgroundColor: '#efd044', borderRadius: 3, maxBarThickness: 24 }]
+        labels,
+        datasets: [{ data: values, backgroundColor: accentColor, borderRadius: 3, maxBarThickness: 24 }]
       },
       options: {
         responsive: true, maintainAspectRatio: false, animation: false,
         plugins: {
           legend: { display: false },
-          tooltip: { callbacks: { label: context => `${solarEnergyText(context.parsed.y)}${periods.find(bucket => bucket.index === context.dataIndex)?.complete ? '' : ' (schatting)'}` } }
+          tooltip: { callbacks: { label: labelFor } }
         },
         scales: {
-          x: { grid: { display: false }, border: { color: '#71897e', dash: [5, 4] }, ticks: { color: '#bbcfc8', maxRotation: 0, autoSkip: false, font: { size: 10 }, callback: (_value, index) => [0, 12, 24, 36, 47].includes(index) ? `${String(Math.floor(index / 2)).padStart(2, '0')}:${index % 2 ? '30' : '00'}` : '' } },
+          x: { grid: { display: false }, border: { color: outlineColor, dash: [5, 4] }, ticks: { color: mutedColor, maxRotation: 0, autoSkip: false, font: { size: 10 }, callback: (_value, index) => [0, 12, 24, 36, 47].includes(index) ? `${String(Math.floor(index / 2)).padStart(2, '0')}:${index % 2 ? '30' : '00'}` : '' } },
           y: { beginAtZero: true, display: false }
         }
       }
@@ -2678,7 +3008,10 @@ function deviceDetail(kind) {
     const header = element('header', 'appliance-header');
     const copy = element('div');
     const power = data.readings.find(item => item.role === 'solar');
-    copy.append(element('h1', '', 'Zonnepanelen'), element('span', 'appliance-status', !power?.valid ? 'Productie onbekend' : Number(power.value) > 0 ? 'Produceert' : 'Produceert niet'));
+    copy.append(element('h1', '', 'Zonnepanelen'), liveText('span', 'appliance-status', () => {
+      const current = data.readings.find(item => item.role === 'solar');
+      return !current?.valid ? 'Productie onbekend' : Number(current.value) > 0 ? 'Produceert' : 'Produceert niet';
+    }));
     const summary = element('summary');
     summary.setAttribute('aria-label', 'Zonnepanelenopties');
     summary.title = 'Zonnepanelenopties';
@@ -2686,7 +3019,7 @@ function deviceDetail(kind) {
     solarMenu.append(summary);
     header.append(icon('sun'), copy, solarMenu);
     const today = element('div', 'solar-today-heading');
-    today.append(element('span', '', 'Vandaag'), element('strong', 'solar-today-total', data.mappings.solarToday ? solarDayText() : 'Ophalen...'));
+    today.append(element('span', '', 'Vandaag'), liveText('strong', 'solar-today-total', () => data.mappings.solarToday ? solarDayText(dailyRecapCache?.rows?.find(item => item.label === 'Zonnepanelen'), dailyRecapCache?.solarToday) : 'Ophalen...'));
     const graph = element('div', 'solar-day-chart');
     const canvas = element('canvas');
     canvas.setAttribute('role', 'img');
@@ -2702,13 +3035,16 @@ function deviceDetail(kind) {
     if (kind !== 'solar') continue;
     const card = element('div', 'solar-measurement');
     const reading = data.readings.find(item => item.role === role);
-    card.append(element('span', '', title), element('strong', '', role === 'solarExpectedToday' && reading?.valid ? solarEnergyText(Number(reading.value)) : measurement(role)));
+    card.append(element('span', '', title), liveText('strong', '', () => {
+      const current = data.readings.find(item => item.role === role);
+      return role === 'solarExpectedToday' && current?.valid ? solarEnergyText(Number(current.value)) : measurement(role);
+    }));
     metrics.append(card);
   }
   if (kind === 'solar') {
     const today = element('div', 'solar-measurement');
     const label = element('span', '', 'Actuele opbrengst vandaag');
-    const actual = element('strong', '', data.mappings.solarToday ? solarDayText() : 'Ophalen...');
+    const actual = liveText('strong', '', () => data.mappings.solarToday ? solarDayText(dailyRecapCache?.rows?.find(item => item.label === 'Zonnepanelen'), dailyRecapCache?.solarToday) : 'Ophalen...');
     actual.id = 'solar-actual-today';
     today.append(label, actual);
     metrics.append(today);
@@ -2732,7 +3068,11 @@ function deviceDetail(kind) {
     } else {
       const sliderLabel = element('label', 'solar-limit-control');
       sliderLabel.htmlFor = 'solar-limit-slider';
-      sliderLabel.append(element('span', '', 'Omvormer terugdimmen'), element('strong', 'solar-limit-value', Number.isFinite(Number(entity.state)) && entity.state.trim() !== '' ? `${number(Number(entity.state))}%` : 'Niet beschikbaar'));
+      const limitValue = liveText('strong', 'solar-limit-value', () => {
+        const current = data.entities.find(item => item.id === data.mappings.solarLimit);
+        return current?.available && Number.isFinite(Number(current.state)) ? `${number(Number(current.state))}%` : 'Niet beschikbaar';
+      });
+      sliderLabel.append(element('span', '', 'Omvormer terugdimmen'), limitValue);
       const slider = element('input', 'solar-limit-slider');
       slider.id = 'solar-limit-slider';
       slider.type = 'range';
@@ -2742,6 +3082,17 @@ function deviceDetail(kind) {
       slider.step = entity.step > 0 ? entity.step : 1;
       slider.value = Number.isFinite(Number(entity.state)) ? Number(entity.state) : 100;
       slider.disabled = !entity.available || !supportsFullRange || !Number.isFinite(entity.step) || entity.step <= 0 || !data.controlStatus?.activeAllowed || data.control?.mode !== 'active' || solarLimitPending;
+      bindLive(limitValue, () => {
+        if (document.activeElement === slider) return;
+        const current = data.entities.find(item => item.id === data.mappings.solarLimit);
+        limitValue.textContent = current?.available && Number.isFinite(Number(current.state)) ? `${number(Number(current.state))}%` : 'Niet beschikbaar';
+      });
+      bindLive(slider, () => {
+        const current = data.entities.find(item => item.id === data.mappings.solarLimit);
+        if (document.activeElement !== slider && current?.available && Number.isFinite(Number(current.state))) slider.value = Number(current.state);
+        const supportsRange = Number.isFinite(current?.minimum) && current.minimum <= 0 && Number.isFinite(current?.maximum) && current.maximum >= 100;
+        slider.disabled = !current?.available || !supportsRange || !Number.isFinite(current?.step) || current.step <= 0 || !data.controlStatus?.activeAllowed || data.control?.mode !== 'active' || solarLimitPending;
+      });
       slider.addEventListener('input', () => { sliderLabel.querySelector('.solar-limit-value').textContent = `${number(Number(slider.value))}%`; });
       sliderLabel.append(slider);
       section.append(sliderLabel);
@@ -2828,14 +3179,22 @@ function batteryControlPanel(parent = main) {
   const stateKnown = reading?.valid && ['on', 'off'].includes(reading.value);
   const enabled = stateKnown && reading.value === 'on';
   const section = element('section', 'battery-control-section');
-  const status = element('span', 'room-status', stateKnown ? enabled ? 'Actief' : 'Stand-by' : 'Status onbekend');
-  const toggle = element('button', 'primary-button', enabled ? 'Accu uitschakelen' : 'Accu activeren');
-  toggle.prepend(icon(enabled ? 'pause' : 'play'));
-  toggle.disabled = !data.controlStatus?.activeAllowed || !stateKnown;
+  const readSwitch = () => data.entities.find(entity => entity.id === data.mappings.batteryEnable);
+  const status = liveText('span', 'room-status', () => readSwitch()?.state === 'on' ? 'Actief' : readSwitch()?.state === 'off' ? 'Stand-by' : 'Status onbekend');
+  const toggle = element('button', 'primary-button');
+  const toggleIcon = icon(enabled ? 'pause' : 'play');
+  const toggleLabel = liveText('span', '', () => readSwitch()?.state === 'on' ? 'Accu uitschakelen' : 'Accu inschakelen');
+  toggle.append(toggleIcon, toggleLabel);
+  bindLive(toggle, () => {
+    const current = readSwitch();
+    toggle.disabled = !data.controlStatus?.activeAllowed || !current?.available || !['on', 'off'].includes(current?.state);
+  });
   toggle.addEventListener('click', () => {
-    const targetEnabled = !enabled;
     const executeBattery = async () => {
       try {
+        const current = readSwitch();
+        if (!current || !['on', 'off'].includes(current.state)) return;
+        const targetEnabled = current.state !== 'on';
         const result = await api('battery/enable', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: targetEnabled, confirm: true }) });
         notify(result.verified ? `Accuschakelaar ${targetEnabled ? 'ingeschakeld' : 'uitgeschakeld'}; status bevestigd.` : 'Accuopdracht verstuurd; de gewenste stand is nog niet teruggekoppeld.', !result.verified);
         await refresh();
@@ -2843,6 +3202,7 @@ function batteryControlPanel(parent = main) {
     };
     if (data.preferences?.confirmSwitches === false) {
       executeBattery();
+    const targetEnabled = readSwitch()?.state !== 'on';
       return;
     }
     const dialog = element('dialog', 'thermal-dialog');
@@ -2875,6 +3235,7 @@ function batteryControlPanel(parent = main) {
 
 function render() {
   if (!data) return;
+  liveBindings.clear();
   for (const item of utilityCharts) item.chart.destroy();
   utilityCharts = [];
   main.replaceChildren();
@@ -2891,7 +3252,7 @@ function navigate(next) {
   render();
 }
 document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', () => navigate(button.dataset.view)));
-document.querySelector('#refresh').addEventListener('click', refresh);
+document.querySelector('#refresh').addEventListener('click', () => refresh(true));
 const sidebar = document.querySelector('.sidebar');
 const menuToggle = document.querySelector('#mobile-menu-toggle');
 const menuBackdrop = document.querySelector('#nav-backdrop');
@@ -2916,12 +3277,35 @@ function applyPowerUnit() {
   powerUnitToggle.textContent = powerUnit;
   powerUnitToggle.setAttribute('aria-label', `${powerUnit === 'kW' ? 'Watt' : 'Kilowatt'} tonen`);
 }
+function updateChartTheme() {
+  const styles = getComputedStyle(document.documentElement);
+  const green = styles.getPropertyValue('--green').trim();
+  const muted = styles.getPropertyValue('--appliance-muted').trim();
+  const line = styles.getPropertyValue('--appliance-outline').trim();
+  const accent = styles.getPropertyValue('--appliance-accent').trim();
+  for (const item of utilityCharts) {
+    const chart = item.chart;
+    if (item.utility === 'solar') {
+      chart.data.datasets[0].backgroundColor = accent;
+      chart.options.scales.x.border.color = line;
+      chart.options.scales.x.ticks.color = muted;
+    } else {
+      chart.data.datasets[0].borderColor = green;
+      chart.data.datasets[0].backgroundColor = `${green}24`;
+      chart.options.scales.x.ticks.color = muted;
+      chart.options.scales.y.grid.color = line;
+      chart.options.scales.y.ticks.color = muted;
+      chart.options.scales.y.title.color = muted;
+    }
+    chart.update('none');
+  }
+}
 applyPowerUnit();
 powerUnitToggle.addEventListener('click', () => {
   powerUnit = powerUnit === 'kW' ? 'W' : 'kW';
   try { localStorage.setItem('gridnest-power-unit', powerUnit); } catch {}
   applyPowerUnit();
-  if (['overview', 'ev', 'battery', 'solar'].includes(view)) render();
+  updateLiveBindings();
 });
 function applyTheme(theme, persist = false) {
   const dark = theme === 'dark';
@@ -2930,6 +3314,7 @@ function applyTheme(theme, persist = false) {
   themeToggle.title = dark ? 'Lichte modus inschakelen' : 'Donkere modus inschakelen';
   themeToggle.replaceChildren(icon(dark ? 'sun' : 'moon'));
   document.querySelector('meta[name="theme-color"]').content = dark ? '#151c19' : '#17694d';
+  updateChartTheme();
   if (persist) {
     try { localStorage.setItem('gridnest-theme', dark ? 'dark' : 'light'); } catch {}
   }
@@ -2939,7 +3324,7 @@ try { savedTheme = localStorage.getItem('gridnest-theme'); } catch {}
 applyTheme(savedTheme ?? (window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
 themeToggle.addEventListener('click', () => {
   applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark', true);
-  if (view === 'overview') render();
+  updateLiveBindings();
 });
 createIcons({ icons });
 setRefreshInterval(10);
