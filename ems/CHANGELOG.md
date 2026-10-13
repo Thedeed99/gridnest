@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.6 - 2026-10-13
+
+- Sta een maximale meetouderdom van 24 uur toe; de standaard blijft 15 minuten.
+- Haal bij het openen van Zonnepanelen verse dagrecapdata op en verwijder de verouderde melding over onvolledige uurgrafiek.
+- Activeer de knop voor batterij-min/max na afloop van de opdracht weer.
+- Toon een open slot bij ontgrendelde laadkabel en een dicht slot bij vergrendelde kabel.
+
 ## 1.0.5 - 2026-10-13
 
 - Update meetwaarden op alle pagina's zonder de pagina of onderdelen opnieuw op te bouwen; behoud invoer en bedieningen.

@@ -9,6 +9,11 @@ const entity = (id, state, extra = {}) => ({ id, domain: id.split('.')[0], state
 const rule = (type, entityId, value, otherwise) => ({ id: 'rule', name: 'Mijn regel', enabled: true, confirmed: true, conditions: [{ entityId: 'sensor.net', operator: 'lt', value: -1000 }], action: { type, entityId, value, otherwise } });
 const input = (type, id, value, otherwise, actuator) => ({ now, temperatureUnit: '°C', mappings: { batterySoc: 'sensor.soc' }, settings: rulesSchema.parse({ ...defaultRules, rules: [rule(type, id, value, otherwise)] }), entities: [entity('sensor.net', -2000), entity('sensor.soc', 50, { unit: '%' }), actuator] });
 
+test('maximale meetouderdom ondersteunt maximaal 24 uur', () => {
+  assert.equal(rulesSchema.parse({ ...defaultRules, maxAgeSeconds: 86400 }).maxAgeSeconds, 86400);
+  assert.throws(() => rulesSchema.parse({ ...defaultRules, maxAgeSeconds: 86460 }));
+});
+
 test('getekende netsensor stuurt laadstart bij export en laadstop bij afname', () => {
   const state = input('ev_enable', 'switch.ev', 'on', 'off', entity('switch.ev', 'off'));
   assert.equal(planRules(state)[0].command.service, 'switch.turn_on');
