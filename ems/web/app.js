@@ -2920,8 +2920,13 @@ function devicePanel(kind) {
       phases.append(phaseCell);
     }
     panel.append(phases);
-    const footer = liveText('p', 'appliance-footer', () => measurement('evLockStatus'));
-    footer.prepend(icon('lock'));
+    const footer = element('p', 'appliance-footer');
+    const footerClosedIcon = icon('lock');
+    footerClosedIcon.classList.add('lock-state-closed');
+    const footerOpenIcon = icon('unlock');
+    footerOpenIcon.classList.add('lock-state-open');
+    bindLive(footer, () => footer.classList.toggle('is-unlocked', lockState() === 'unlocked'));
+    footer.append(footerClosedIcon, footerOpenIcon, liveText('span', '', () => measurement('evLockStatus')));
     panel.append(footer);
     if (!allowed) panel.append(element('p', 'appliance-control-note', 'Handmatige bediening vereist vrijgave voor echte apparaatsturing.'));
     if (!data.mappings.evEnable || !data.mappings.evCurrentLimit) {

@@ -314,6 +314,9 @@ footer { display: flex; justify-content: space-between; gap: 12px; font-size: 10
 .charger-lock-control button .lock-state-open { display: none; }
 .charger-lock-control button.is-unlocked .lock-state-closed { display: none; }
 .charger-lock-control button.is-unlocked .lock-state-open { display: block; }
+.appliance-footer .lock-state-open { display: none; }
+.appliance-footer.is-unlocked .lock-state-closed { display: none; }
+.appliance-footer.is-unlocked .lock-state-open { display: block; }
 :root .appliance-panel .primary-button { background: #efd044; color: #10251d; border-color: #efd044; border-radius: 24px; justify-content: center; min-height: 40px; width: 100%; }
 :root .appliance-panel .primary-button:hover { background: #f7dc61; }
 .charger-panel > .appliance-command { width: 60%; min-width: 180px; display: flex; margin: 0 auto 16px; }
