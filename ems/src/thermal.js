@@ -3,8 +3,8 @@ import { thermalSchema } from './store.js';
 import { isFresh, planRules } from './rules.js';
 import { solarTarget } from './thermal-solar.js';
 
-export function entityPresence(entity, now = null, maxAge = 900) {
-  const usable = entity?.available && (now === null || isFresh(entity, now, maxAge));
+export function entityPresence(entity) {
+  const usable = entity?.available;
   if (!usable) return null;
   if (['person', 'device_tracker'].includes(entity.domain)) {
     if (['', 'unknown', 'unavailable'].includes(entity.state)) return null;
@@ -14,10 +14,10 @@ export function entityPresence(entity, now = null, maxAge = 900) {
   return null;
 }
 
-export function householdPresence(preferences, entities, now = null, maxAge = 900) {
+export function householdPresence(preferences, entities) {
   const members = (preferences.presenceEntities ?? []).map(id => {
     const entity = entities.find(entity => entity.id === id);
-    const home = entityPresence(entity, now, maxAge);
+    const home = entityPresence(entity);
     return { id, name: entity?.name ?? id, home };
   });
   let occupied = null;
@@ -87,7 +87,7 @@ export function thermalReadings(thermal, entities, preferences = {}) {
       }
     }
     const presence = find(room.presenceEntity);
-    const occupied = room.presenceEntity ? entityPresence(presence) : householdPresence(preferences, entities).occupied;
+    const occupied = entityPresence(presence) ?? householdPresence(preferences, entities).occupied;
     const status = currentC === null ? 'missing' : currentC < room.targetC - 0.3 ? 'below' : currentC > room.targetC + 0.3 ? 'above' : 'at-target';
     return { ...room, currentC, thermostatTargetC, occupied, status, updatedAt: temperature?.updatedAt ?? null,
       sources: room.sourceIds.map(id => sources.find(source => source.id === id)).filter(Boolean) };
@@ -118,9 +118,10 @@ export function planThermal({ thermal, settings, entities, mappings, temperature
     let occupied = null;
     if (room.presenceControl) {
       const presence = entities.find(entity => entity.id === room.presenceEntity);
-      occupied = room.presenceEntity ? entityPresence(presence, now, settings.maxAgeSeconds) : householdPresence(preferences, entities, now, settings.maxAgeSeconds).occupied;
-      if (occupied === null || !Number.isFinite(preferences.awayC)) { plans.push(blocked('Aanwezigheidsregeling vereist bekende, recente aanwezigheid en een afwezigtemperatuur.')); continue; }
-      if (!occupied) baseTarget = Math.min(room.targetC, preferences.awayC);
+      occupied = entityPresence(presence) ?? householdPresence(preferences, entities).occupied;
+      const awayC = room.awayC ?? preferences.awayC;
+      if (occupied === null || !Number.isFinite(awayC)) { plans.push(blocked('Aanwezigheidsregeling vereist bekende, recente aanwezigheid en een afwezigtemperatuur.')); continue; }
+      if (!occupied) baseTarget = Math.min(room.targetC, awayC);
     }
     const solar = room.presenceControl && occupied === false ? { targetC: baseTarget, active: false, next: { active: false }, reason: 'Afwezig: begrensd afwezigdoel, geen zonneboost.' } : solarTarget({ source, baseTarget, entities, mappings, now, maxAge: settings.maxAgeSeconds, previous: solarMemory.get(source.id), allowStart: !solarOwner || solarOwner === source.id });
     if (source.solar?.enabled && !solarOwner && (solar.active || solar.next.candidate === true)) solarOwner = source.id;

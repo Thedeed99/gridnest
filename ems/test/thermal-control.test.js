@@ -24,6 +24,12 @@ test('Warmte zet het kamerdoel om in een thermostaatopdracht, ook zonder gebruik
   assert.deepEqual(plans[0].command, { entityId: 'climate.cv', service: 'climate.set_temperature', value: 21 });
 });
 
+test('Warmte stuurt een beschikbare thermostaat aan met een onveranderde oude status', () => {
+  const input = fixture();
+  input.entities[1].reportedAt = '2026-10-11T00:00:00Z';
+  assert.deepEqual(planThermal(input)[0].command, { entityId: 'climate.cv', service: 'climate.set_temperature', value: 21 });
+});
+
 test('kamerspecifieke person-aanwezigheid stuurt het kamerdoel naar comfort of afwezig', () => {
   const input = fixture();
   input.thermal.rooms[0].presenceEntity = 'person.resident';
@@ -34,6 +40,32 @@ test('kamerspecifieke person-aanwezigheid stuurt het kamerdoel naar comfort of a
   assert.equal(planThermal(input)[0].command.value, 21);
   input.entities.find(entity => entity.id === 'person.resident').state = 'not_home';
   assert.equal(planThermal(input)[0].command.value, 17);
+  input.thermal.rooms[0].awayC = 19;
+  assert.equal(planThermal(input)[0].command.value, 19);
+});
+
+test('aanwezigheid gebruikt alleen de status en valt bij een onbruikbare kamersensor terug op Mijn wensen', () => {
+  const input = fixture();
+  input.thermal.rooms[0].presenceControl = true;
+  input.thermal.rooms[0].presenceEntity = 'binary_sensor.room_presence';
+  input.preferences = { awayC: 16, presenceEntities: ['person.resident'], presenceMode: 'any' };
+  input.entities.push(
+    { id: 'binary_sensor.room_presence', domain: 'binary_sensor', deviceClass: 'presence', available: false, state: 'unavailable' },
+    { id: 'person.resident', domain: 'person', available: true, state: 'not_home', reportedAt: '2026-10-11T00:00:00Z' }
+  );
+  assert.equal(planThermal(input)[0].command.value, 16);
+  input.entities[3].state = 'home';
+  assert.equal(planThermal(input)[0].command.value, 21);
+});
+
+test('warmte gebruikt de aanwezigheid uit Mijn wensen als de kamer geen eigen sensor heeft', () => {
+  const input = fixture();
+  input.thermal.rooms[0].presenceControl = true;
+  input.preferences = { awayC: 16, presenceEntities: ['person.resident'], presenceMode: 'any' };
+  input.entities.push({ id: 'person.resident', domain: 'person', available: true, state: 'not_home', reportedAt: new Date(now).toISOString() });
+  assert.equal(planThermal(input)[0].command.value, 16);
+  input.thermal.rooms[0].awayC = 18;
+  assert.equal(planThermal(input)[0].command.value, 18);
 });
 
 test('verwarmmodus volgt pas nadat het juiste temperatuurdoel wordt teruggemeld', () => {

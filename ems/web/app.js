@@ -4,6 +4,7 @@ import { createId } from './ids.js';
 import { climateStatus, modeLabel, onlyRoomTargetChanged } from './status.js';
 import { formatPower } from './power.js';
 import { dailyOverviewRows } from '../src/daily-recap.js';
+import { isCumulativeSolarMeter } from '../src/solar-meter.js';
 import { batteryState } from './battery.js';
 
 function isCompatibleEntity(role, entity) {
@@ -621,10 +622,10 @@ async function loadDailyRecap(container, reload = false, filter = null) {
     if (solarActual) {
       const solarRow = recap.rows.find(row => row.label === 'Zonnepanelen');
       solarActual.textContent = solarDayText(solarRow, recap.solarToday);
-      if (data.mappings.solarTodayMode === 'total' && recap.solarToday?.energyKwh == null) solarActual.title = 'Beginstand rond middernacht ontbreekt, of de teller is ongeldig of gereset.';
+      if (isCumulativeSolarMeter(data.entities.find(entity => entity.id === data.mappings.solarToday), data.mappings.solarTodayMode) && recap.solarToday?.energyKwh == null) solarActual.title = 'Beginstand rond middernacht ontbreekt, of de teller is ongeldig of gereset.';
     }
     const rows = filter ? recap.rows.filter(row => filter(row)).map(row => ({ label: row.label, value: row.energyKwh, unit: 'kWh', complete: row.complete }))
-      : dailyOverviewRows(recap, data.mappings, utilities);
+      : dailyOverviewRows({ ...recap, dailySolarTodayKwh: data.energy?.solarOutlook?.actualTodayKwh }, data.mappings, utilities);
     if (!rows.length) {
       container.append(element('p', 'empty-state', 'Koppel passende meters om dagtotalen te tonen.'));
       return;
@@ -962,8 +963,12 @@ function editThermal(kind, id = null, floor = '') {
     const presenceLabel = element('label', 'checkbox-field');
     const presenceControl = element('input');
     presenceControl.type = 'checkbox'; presenceControl.name = 'presenceControl'; presenceControl.checked = original?.presenceControl ?? false;
-    presenceLabel.append(presenceControl, element('span', '', 'Afwezigtemperatuur toepassen bij afwezigheid'));
+    presenceLabel.append(presenceControl, element('span', '', 'Afwezigtemperatuur toepassen bij afwezigheid (kamer- of wenssensor)'));
     fields.append(presenceLabel);
+    const away = element('input', 'text-input');
+    away.type = 'number'; away.name = 'awayC'; away.min = 12; away.max = 24; away.step = 0.5;
+    away.value = original?.awayC ?? '';
+    addField('awayC', 'Afwezigtemperatuur (°C, leeg = Mijn wensen)', away);
     addField('targetC', 'Gewenste temperatuur (°C)', target);
     const sources = element('fieldset', 'source-choices');
     sources.append(element('legend', '', 'Warmtebronnen'));
@@ -1083,7 +1088,8 @@ function editThermal(kind, id = null, floor = '') {
       const item = isRoom ? {
         id: id ?? createId(), name: values.get('name'), floor: values.get('floor'),
         temperatureEntity: values.get('temperatureEntity') || null, presenceEntity: values.get('presenceEntity') || null,
-        targetC: Number(values.get('targetC')), presenceControl: values.has('presenceControl'), sourceIds: values.getAll('sourceIds')
+        targetC: Number(values.get('targetC')), presenceControl: values.has('presenceControl'),
+        awayC: values.get('awayC') === '' ? null : Number(values.get('awayC')), sourceIds: values.getAll('sourceIds')
       } : { ...original, id: id ?? createId(), name: values.get('name'), entityId: values.get('entityId') || null, profile: values.get('profile') };
       if (!isRoom) {
         item.controlEnabled = values.has('controlEnabled'); item.confirmed = values.has('confirmed');
@@ -2227,10 +2233,10 @@ function singleBatteryPanel(batConfig) {
       const execute = async () => {
         try {
           if (switchEntity) {
-            await api('consumers/enable', {
+            await api(`batteries/${encodeURIComponent(batConfig.id)}/enable`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ consumerId: batConfig.id, switchId: actualSwitchEntity.id, enabled: targetEnabled, expectedState: actualSwitchEntity.state, confirm: true })
+              body: JSON.stringify({ switchId: actualSwitchEntity.id, enabled: targetEnabled, expectedState: actualSwitchEntity.state, confirm: true })
             });
           } else {
             await api('battery/enable', {
@@ -2485,9 +2491,9 @@ function devicePanel(kind) {
     const lockControl = element('div', 'charger-lock-control');
     const lockEntity = data.entities.find(item => item.id === data.mappings.evLockStatus);
     const lockStates = lockEntity?.domain === 'switch' ? ['on', 'off'] : ['locked', 'unlocked'];
-    const locked = lock?.value === lockStates[0];
+    const locked = lockStates.includes(lock?.value) && lock.value === lockStates[0];
     const lockButton = toolButton('lock', locked ? 'Kabel ontgrendelen' : 'Kabel vergrendelen', () => confirmCommand(locked ? 'Kabel ontgrendelen' : 'Kabel vergrendelen', { action: 'lock', locked: !locked }));
-    lockButton.disabled = !allowed || !lock?.valid || !['switch', 'lock'].includes(lockEntity?.domain) || !lockStates.includes(lock.value);
+    lockButton.disabled = !allowed || !['switch', 'lock'].includes(lockEntity?.domain);
     lockControl.append(lockButton, element('span', '', 'Kabelvergrendeling'));
     panel.append(lockControl);
     const charging = enabled?.value === 'on';
@@ -2552,7 +2558,9 @@ function devicePanel(kind) {
 const solarEnergyText = value => `${new Intl.NumberFormat('nl-NL', { maximumFractionDigits: 2 }).format(value)} kWh`;
 
 function solarDayText(row, solarMeter = null) {
-  const value = data.mappings.solarToday ? data.mappings.solarTodayMode === 'total' ? solarMeter?.energyKwh : data.energy?.solarOutlook?.actualTodayKwh : row?.energyKwh;
+  const entity = data.entities.find(item => item.id === data.mappings.solarToday);
+  const cumulative = isCumulativeSolarMeter(entity, data.mappings.solarTodayMode);
+  const value = data.mappings.solarToday ? cumulative ? solarMeter?.energyKwh : data.energy?.solarOutlook?.actualTodayKwh : row?.energyKwh;
   if (value === null || value === undefined) return 'Niet beschikbaar';
   return `${solarEnergyText(value)}${!data.mappings.solarToday && !row.complete ? ' (schatting)' : ''}`;
 }
@@ -2566,8 +2574,9 @@ async function loadSolarChart(panel, reload = false) {
     const text = solarDayText(row, recap.solarToday);
     panel.querySelector('.solar-today-total').textContent = text;
     panel.querySelector('#solar-actual-today').textContent = text;
-    status.textContent = data.mappings.solarTodayMode === 'total' && data.mappings.solarToday && recap.solarToday?.energyKwh == null ? 'Geen geldig dagverschil: beginstand rond middernacht ontbreekt of de teller is gereset.'
-      : data.mappings.solarToday && data.mappings.solarTodayMode !== 'total' && data.energy?.solarOutlook?.actualTodayKwh === null ? 'De gekoppelde dagopbrengst is niet beschikbaar.'
+    const cumulative = isCumulativeSolarMeter(data.entities.find(entity => entity.id === data.mappings.solarToday), data.mappings.solarTodayMode);
+    status.textContent = cumulative && data.mappings.solarToday && recap.solarToday?.energyKwh == null ? 'Geen geldig dagverschil: beginstand rond middernacht ontbreekt of de teller is gereset.'
+      : data.mappings.solarToday && !cumulative && data.energy?.solarOutlook?.actualTodayKwh === null ? 'De gekoppelde dagopbrengst is niet beschikbaar.'
       : !row || row.energyKwh === null ? 'Geen opbrengsthistorie beschikbaar.'
         : !row.complete ? 'De uurgrafiek is onvolledig: er ontbreken meetpunten.' : '';
     const canvas = panel.querySelector('canvas');

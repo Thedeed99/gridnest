@@ -23,6 +23,19 @@ test('oude of ontbrekende voorwaarde veroorzaakt nooit een anders-opdracht', () 
   assert.equal(planRules(state)[0].status, 'blocked');
 });
 
+test('beschikbare actuator blijft bedienbaar als zijn toestand al langer onveranderd is', async () => {
+  const state = input('ev_enable', 'switch.ev', 'on', 'off', entity('switch.ev', 'off'));
+  state.entities[2].reportedAt = '2026-10-11T00:00:00Z';
+  state.entities[2].changedAt = '2026-10-11T00:00:00Z';
+  assert.equal(planRules(state)[0].command.service, 'switch.turn_on');
+  const config = { control: { ...state.settings, mode: 'active' }, mappings: state.mappings };
+  const sent = [];
+  const runner = createRuleRunner({ store: { get: () => structuredClone(config) }, provider: async () => ({ connected: true, entities: state.entities }),
+    unitProvider: async () => '°C', execute: async command => sent.push(command), activeAllowed: true, clock: () => now });
+  assert.equal((await runner.tick()).decisions[0].status, 'sent');
+  assert.equal(sent.length, 1);
+});
+
 test('stroomlimiet en PV-limiet respecteren eenheid, min/max en stap', () => {
   const amps = input('ev_current', 'number.amps', 12, 6, entity('number.amps', 6, { unit: 'A', minimum: 6, maximum: 16, step: 1 }));
   assert.equal(planRules(amps)[0].command.value, 12);

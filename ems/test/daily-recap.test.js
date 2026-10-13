@@ -46,6 +46,18 @@ test('overzichtsrecap toont alleen hoofdtotale waarden, batterijrichtingen en op
   assert.ok(missing.every(row => row.value === null));
 });
 
+test('overzichtsrecap toont zonneproductie als dagwaarde voor vermogen- en cumulatieve meters', () => {
+  const mappings = { ...emptyMappings, solar: 'sensor.solar_power', solarToday: 'sensor.solar_total', solarTodayMode: 'total' };
+  const recap = { rows: [{ entityId: 'sensor.solar_power', label: 'Zonnepanelen', energyKwh: 3.2, complete: false }],
+    solarToday: { energyKwh: 4.7, complete: true, source: 'cumulative-meter' } };
+  const result = dailyOverviewRows(recap, mappings);
+  const solar = result.find(row => row.label === 'Zonnepanelen');
+  assert.equal(solar.value, 4.7);
+  assert.equal(solar.source, 'home-assistant');
+  const daily = dailyOverviewRows({ rows: [], dailySolarTodayKwh: 2.5 }, { ...mappings, solarTodayMode: 'daily' });
+  assert.equal(daily.find(row => row.label === 'Zonnepanelen').value, 2.5);
+});
+
 test('recap berekent dagverbruik alleen bij volledige balansbronnen en ondersteunt losse batterijmetingen', () => {
   const mappings = { ...emptyMappings, solar: 'sensor.solar', gridImport: 'sensor.import', gridExport: 'sensor.export', batteryMode: 'none' };
   const recap = { rows: [['sensor.solar', 'Zonnepanelen', 5], ['sensor.import', 'Netafname', 3], ['sensor.export', 'Teruglevering', 2]].map(([entityId, label, energyKwh]) => ({ entityId, label, energyKwh, complete: true })) };

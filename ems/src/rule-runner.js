@@ -86,7 +86,7 @@ export function createRuleRunner({ store, provider, unitProvider, execute, activ
         const freshConnection = await provider();
         if (!freshConnection.connected) throw new Error('offline');
         const verified = collect(freshConnection.entities, clock()).find(item => item.id === rule.id);
-        if (!verified?.command || JSON.stringify(verified.command) !== JSON.stringify(decision.command) || !isFresh(freshConnection.entities.find(item => item.id === actuator.id), clock(), settings.maxAgeSeconds) || JSON.stringify(store.get()) !== JSON.stringify(snapshot)) {
+        if (!verified?.command || JSON.stringify(verified.command) !== JSON.stringify(decision.command) || !freshConnection.entities.find(item => item.id === actuator.id)?.available || JSON.stringify(store.get()) !== JSON.stringify(snapshot)) {
           decision.command = null; decision.status = 'waiting'; decision.reason = 'Meetwaarden of instellingen gewijzigd; opnieuw beoordelen.'; continue;
         }
         try {

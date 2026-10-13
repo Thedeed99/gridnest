@@ -43,7 +43,7 @@ export function dailyOverviewRows(recap, mappings, utilities = {}) {
       if (label === 'Gas' && !utilities.gas || label === 'Water' && !utilities.water) continue;
       combined.set(label, row);
     }
-    return ['Woningverbruik', 'Teruglevering', 'Laadpaal', 'Batterij laden', 'Batterij ontladen', 'Gas', 'Water']
+    return ['Woningverbruik', 'Teruglevering', 'Zonnepanelen', 'Laadpaal', 'Batterij laden', 'Batterij ontladen', 'Gas', 'Water']
       .filter(label => combined.has(label)).map(label => combined.get(label));
   }
   const rows = [];
@@ -62,6 +62,15 @@ export function dailyOverviewRows(recap, mappings, utilities = {}) {
     add('Woningverbruik', { energyKwh: value !== null && value >= 0 ? value : null, complete: valid && inputs.every(row => row.complete) });
   } else add('Woningverbruik', null);
   add('Teruglevering', find(mappings.gridMode === 'signed' ? 'gridPower' : 'gridExport', 'Teruglevering'));
+  if (mappings.solarToday || mappings.solar) {
+    const solarMeter = recap.solarToday;
+    const row = solarMeter?.source === 'cumulative-meter' || mappings.solarTodayMode === 'total'
+      ? solarMeter
+      : recap.dailySolarTodayKwh !== undefined && recap.dailySolarTodayKwh !== null
+        ? { energyKwh: recap.dailySolarTodayKwh, complete: true, source: 'home-assistant' }
+        : find('solar', 'Zonnepanelen');
+    add('Zonnepanelen', row?.source === 'cumulative-meter' ? { ...row, source: 'home-assistant' } : row);
+  }
   if (mappings.evPower) add('Laadpaal', find('evPower', 'Laadpaal'));
   if (mappings.batteryMode === 'measured' && mappings.batteryPower) {
     add('Batterij laden', find('batteryPower', 'Batterij laden'));

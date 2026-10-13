@@ -138,7 +138,7 @@ export function planRules({ settings, entities, mappings, temperatureUnit, now =
     }
     const action = rule.action;
     const entity = entities.find(entity => entity.id === action.entityId);
-    if (!isFresh(entity, now, settings.maxAgeSeconds) || entity.domain !== actionTypes.find(type => type.id === action.type).domain) return blocked('Bedieningsentiteit ontbreekt of is niet recent.');
+    if (!entity?.available || entity.domain !== actionTypes.find(type => type.id === action.type).domain) return blocked('Bedieningsentiteit ontbreekt of is niet beschikbaar.');
     let value = match ? action.value : action.otherwise;
     let service;
     let observed;

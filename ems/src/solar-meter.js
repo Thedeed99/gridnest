@@ -1,5 +1,9 @@
 import { energyDayRange } from './energy-statistics.js';
 
+export function isCumulativeSolarMeter(entity, mode) {
+  return mode === 'total' || entity?.stateClass === 'total_increasing';
+}
+
 export function cumulativeSolarToday(history, entity, now = new Date(), timeZone = 'Europe/Amsterdam') {
   const range = energyDayRange(now, timeZone);
   const start = Date.parse(range.start);

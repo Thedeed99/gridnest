@@ -12,7 +12,7 @@ import { createRuleRunner } from './rule-runner.js';
 import { demoUtilityHistory, readUtilityHistory } from './gas.js';
 import { dailyEnergyRecap, demoDailyRecap, recapMeters, readDailyRecap } from './daily-recap.js';
 import { readOfficialEnergy } from './energy-statistics.js';
-import { cumulativeSolarToday, readSolarMeterToday } from './solar-meter.js';
+import { cumulativeSolarToday, isCumulativeSolarMeter, readSolarMeterToday } from './solar-meter.js';
 
 export function createApp({ store, entitiesProvider, demo = false, supervisor = false, runner = null,
   isIngressRequest = request => request.socket.remoteAddress === '172.30.32.2' || request.socket.remoteAddress === '::ffff:172.30.32.2',
@@ -73,9 +73,10 @@ export function createApp({ store, entitiesProvider, demo = false, supervisor = 
   app.get('/api/daily-recap', async (_request, response) => {
     try {
       const config = store.get();
-      const cumulative = config.mappings.solarToday && config.mappings.solarTodayMode === 'total';
-      const [history, official, solar] = await Promise.allSettled([dailyRecapProvider(config.mappings), officialRecapProvider(config.mappings), cumulative ? solarTodayProvider(config.mappings.solarToday) : Promise.resolve(null)]);
+      const hasSolarMeter = Boolean(config.mappings.solarToday);
+      const [history, official, solar] = await Promise.allSettled([dailyRecapProvider(config.mappings), officialRecapProvider(config.mappings), hasSolarMeter ? solarTodayProvider(config.mappings.solarToday, config.mappings.solarTodayMode) : Promise.resolve(null)]);
       const statistics = official.status === 'fulfilled' ? official.value : null;
+      const cumulative = config.mappings.solarTodayMode === 'total' || solar.status === 'fulfilled' && solar.value?.source === 'cumulative-meter';
       const solarToday = cumulative ? solar.status === 'fulfilled' && solar.value ? solar.value : { energyKwh: null, complete: false, source: 'cumulative-meter', error: 'Zonne-totaalmeterhistorie niet beschikbaar.' } : null;
       if (history.status === 'rejected' && !statistics && solarToday?.energyKwh == null) throw history.reason;
       const recap = history.status === 'fulfilled' ? history.value : { available: false, complete: false, rows: [] };
@@ -131,6 +132,26 @@ export function createApp({ store, entitiesProvider, demo = false, supervisor = 
       return response.status(503).json({ error: error.message || 'Accubediening mislukt.' });
     }
   });
+  app.post('/api/batteries/:batteryId/enable', async (request, response) => {
+    const body = z.object({ switchId: z.string().regex(/^switch\.[a-z0-9_]+$/), enabled: z.boolean(),
+      expectedState: z.enum(['on', 'off']), confirm: z.literal(true) }).strict().safeParse(request.body);
+    if (!body.success || !/^[a-zA-Z0-9_-]{1,64}$/.test(request.params.batteryId)) return response.status(400).json({ error: 'Bevestig een geldige accuschakelaar en gewenste stand.' });
+    if (!supervisor || demo || !runner?.status().activeAllowed) return response.status(403).json({ error: 'Accubediening vereist vrijgave in de Home Assistant-app.' });
+    const { switchId, enabled, expectedState } = body.data;
+    const battery = store.get().mappings.batteries.find(item => item.id === request.params.batteryId);
+    if (!battery || battery.switchEntity !== switchId) return response.status(409).json({ error: 'De accuschakelaar is niet meer zo gekoppeld.' });
+    try {
+      const connection = await entitiesProvider();
+      const actuator = connection.entities.find(entity => entity.id === switchId);
+      if (!connection.connected || !actuator?.available || actuator.domain !== 'switch' || actuator.state !== expectedState) return response.status(409).json({ error: 'De accuschakelaar is niet beschikbaar of heeft inmiddels een andere stand.' });
+      const current = store.get().mappings.batteries.find(item => item.id === request.params.batteryId);
+      if (!runner.status().activeAllowed || current?.switchEntity !== switchId) return response.status(409).json({ error: 'Accuvrijgave of koppeling is gewijzigd; bevestig opnieuw.' });
+      await batterySwitchProvider(switchId, enabled);
+      return response.json({ batteryId: request.params.batteryId, switchId, enabled });
+    } catch (error) {
+      return response.status(503).json({ error: error.message || 'Accubediening mislukt.' });
+    }
+  });
   app.post('/api/battery/levels', async (request, response) => {
     const body = z.object({ batteryId: z.string(), min: z.number().finite().min(0).max(100), max: z.number().finite().min(0).max(100), confirm: z.literal(true) }).strict().parse(request.body);
     if (!supervisor || demo || !runner?.status().activeAllowed || store.get().control.mode !== 'active') return response.status(403).json({ error: 'Batterijniveaus instellen vereist vrijgave en Actief.' });
@@ -181,8 +202,6 @@ export function createApp({ store, entitiesProvider, demo = false, supervisor = 
         command = { entityId, service: `switch.turn_${body.data.enabled ? 'on' : 'off'}` };
       } else {
         if (!['lock', 'switch'].includes(actuator.domain) || !(actuator.domain === 'switch' ? ['on', 'off'] : ['locked', 'unlocked']).includes(actuator.state)) return response.status(409).json({ error: 'Ongeldige kabelvergrendeling.' });
-        const power = connection.entities.find(entity => entity.id === snapshot.mappings.evPower);
-        if (!body.data.locked && (!isFresh(power, Date.now(), snapshot.control.maxAgeSeconds) || !['W', 'kW'].includes(power.unit) || power.state.trim() === '' || !Number.isFinite(Number(power.state)) || Number(power.state) !== 0)) return response.status(409).json({ error: 'Stop eerst het laden; ontgrendelen vereist recent gemeten nulvermogen.' });
         const service = actuator.domain === 'switch' ? `switch.turn_${body.data.locked ? 'on' : 'off'}` : `lock.${body.data.locked ? 'lock' : 'unlock'}`;
         command = { entityId, service };
       }
@@ -313,10 +332,11 @@ export async function startServer(env = process.env) {
     : async mappings => readDailyRecap(env, recapMeters(mappings, (await entitiesProvider()).entities));
   const batterySwitchProvider = (entityId, enabled) => executeRuleCommand({ entityId, service: `switch.turn_${enabled ? 'on' : 'off'}` }, controlEnv);
   const officialRecapProvider = demo ? async () => null : mappings => readOfficialEnergy(env, mappings);
-  const solarTodayProvider = async entityId => {
+  const solarTodayProvider = async (entityId, mode) => {
     const now = new Date();
     const entity = (await entitiesProvider()).entities.find(item => item.id === entityId);
     if (!entity) return { energyKwh: null, complete: false };
+    if (!isCumulativeSolarMeter(entity, mode)) return null;
     if (!demo) return readSolarMeterToday(env, entity, fetch, now);
     return cumulativeSolarToday([[{ state: String(Number(entity.state) - (entity.unit === 'Wh' ? 7120 : 7.12)), last_updated: new Date(now.getTime() - 30 * 3600000).toISOString() }]], entity, now);
   };

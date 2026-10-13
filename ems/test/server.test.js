@@ -499,6 +499,26 @@ test('UPS uitschakelen accepteert een onveranderde oude status en controleert te
   assert.equal(commands, 1);
 });
 
+test('extra batterijschakelaar schakelt alleen de bijbehorende batterij uit', async context => {
+  let state = 'on';
+  const commands = [];
+  const { url, store } = await fixture(context, {
+    demo: false, supervisor: true, isIngressRequest: () => true,
+    entitiesProvider: async () => ({ connected: true, entities: [{ id: 'switch.extra_battery', domain: 'switch', available: true, state }] }),
+    runner: { status: () => ({ activeAllowed: true }) },
+    batterySwitchProvider: async (entityId, enabled) => { commands.push({ entityId, enabled }); state = enabled ? 'on' : 'off'; }
+  });
+  await store.update({ mappings: { ...emptyMappings, batteries: [{ id: 'extra', name: 'Extra', switchEntity: 'switch.extra_battery' }] } });
+  const send = (batteryId, switchId, expectedState, enabled = false) => fetch(`${url}/api/batteries/${batteryId}/enable`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ switchId, enabled, expectedState, confirm: true })
+  });
+  assert.equal((await send('extra', 'switch.extra_battery', 'on')).status, 200);
+  assert.equal((await send('extra', 'switch.extra_battery', 'on')).status, 409);
+  assert.equal((await send('missing', 'switch.extra_battery', 'off', true)).status, 409);
+  assert.deepEqual(commands, [{ entityId: 'switch.extra_battery', enabled: false }]);
+});
+
 test('laadpaalbediening bewaakt vrijgave, kabel, stroomlimiet en ontgrendelen', async context => {
   const commands = [];
   let activeAllowed = false;
@@ -520,21 +540,21 @@ test('laadpaalbediening bewaakt vrijgave, kabel, stroomlimiet en ontgrendelen', 
   assert.equal((await send({ action: 'current', value: 12, confirm: true })).status, 200);
   assert.equal((await send({ action: 'current', value: 17, confirm: true })).status, 409);
   assert.equal((await send({ action: 'current', value: 6.5, confirm: true })).status, 409);
-  assert.equal((await send({ action: 'lock', locked: false, confirm: true })).status, 409);
+  assert.equal((await send({ action: 'lock', locked: false, confirm: true })).status, 200);
   entities = entities.map(entity => entity.id === 'sensor.demo_ev_power' ? { ...entity, state: '0' } : entity);
   assert.equal((await send({ action: 'lock', locked: false, confirm: true })).status, 200);
   entities = entities.map(entity => entity.id === 'binary_sensor.demo_ev_cable' ? { ...entity, state: 'off' } : entity);
   assert.equal((await send({ action: 'enable', enabled: true, confirm: true })).status, 409);
   entities = entities.map(entity => ({ ...entity, reportedAt: '2000-01-01T00:00:00Z', updatedAt: '2000-01-01T00:00:00Z' }));
   assert.equal((await send({ action: 'current', value: 12, confirm: true })).status, 200);
-  assert.equal((await send({ action: 'lock', locked: false, confirm: true })).status, 409);
+  assert.equal((await send({ action: 'lock', locked: false, confirm: true })).status, 200);
   entities = entities.map(entity => entity.id === 'number.demo_ev_current' ? { ...entity, available: false } : entity);
   assert.equal((await send({ action: 'current', value: 12, confirm: true })).status, 409);
-  assert.equal(commands.length, 4);
+  assert.equal(commands.length, 6);
   assert.deepEqual(commands[1], { entityId: 'number.demo_ev_current', service: 'number.set_value', value: 12 });
 });
 
-test('kabelvergrendeling via switch ondersteunt on/off en weigert ontgrendelen tijdens laden', async context => {
+test('kabelvergrendeling via switch ondersteunt on/off zonder stroommeting als voorwaarde', async context => {
   const commands = [];
   let entities = demoEntities();
   const { url, store } = await fixture(context, {
@@ -545,16 +565,17 @@ test('kabelvergrendeling via switch ondersteunt on/off en weigert ontgrendelen t
   });
   await store.update({ mappings: { ...emptyMappings, evLockStatus: 'switch.thuis_laadkabel_vergrendeling', evPower: 'sensor.demo_ev_power' } });
   const send = locked => fetch(`${url}/api/ev/control`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'lock', locked, confirm: true }) });
-  assert.equal((await send(false)).status, 409);
+  assert.equal((await send(false)).status, 200);
   entities.find(item => item.id === 'sensor.demo_ev_power').state = '';
-  assert.equal((await send(false)).status, 409);
+  assert.equal((await send(false)).status, 200);
   entities.find(item => item.id === 'sensor.demo_ev_power').state = '0';
   assert.equal((await send(false)).status, 200);
   assert.deepEqual(commands[0], { entityId: 'switch.thuis_laadkabel_vergrendeling', service: 'switch.turn_off' });
   assert.equal((await send(true)).status, 200);
-  assert.equal(commands[1].service, 'switch.turn_on');
+  assert.equal(commands[3].service, 'switch.turn_on');
   entities.find(item => item.id === 'switch.thuis_laadkabel_vergrendeling').state = 'unknown';
   assert.equal((await send(true)).status, 409);
+  assert.equal(commands.length, 4);
 });
 
 test('omvormerslider vereist actieve vrijgave, bevestiging en geldige stap', async context => {
