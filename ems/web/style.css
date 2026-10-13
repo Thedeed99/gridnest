@@ -470,3 +470,75 @@ footer { display: flex; justify-content: space-between; gap: 12px; font-size: 10
 @media (max-width: 680px) { nav { grid-template-columns: repeat(5, minmax(0, 1fr)); } nav button { font-size: 9px; } .rule-controlbar { flex-wrap: wrap; } .rule-controlbar .mapping-setting { flex-basis: 100%; } .rule-controlbar .primary-button { flex: 1; } .condition-row { grid-template-columns: minmax(0, 1fr) 36px; } .condition-row > .mapping-setting { grid-column: 1 / -1; } .condition-values { grid-column: 1; grid-template-columns: minmax(0, 1fr); } .rule-dialog .mapping-setting > span { font-size: 11px; } }
 @media (max-width: 1000px) { .shell { grid-template-columns: 190px minmax(0, 1fr); } main { padding: 28px 26px; } .topbar { padding: 0 26px; } .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; } .metric:nth-child(2) { border: 0; } footer { padding-inline: 26px; } }
 @media (max-width: 680px) { .shell { display: block; } .sidebar { padding: 16px 16px 0; border-right: 0; border-bottom: 1px solid var(--line); } .brand { font-size: 15px; gap: 10px; padding: 0; } .brand br { display: none; } .brand-icon { width: 32px; height: 32px; } .brand-icon svg { width: 21px; height: 21px; } nav { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; margin-top: 14px; } nav button { justify-content: center; gap: 6px; font-size: 11px; padding: 8px 3px; min-height: 44px; border-radius: 4px 4px 0 0; } nav svg { width: 16px; height: 16px; } .sidebar-bottom { display: none; } .topbar { height: 54px; padding-inline: 18px; font-size: 11px; } main { padding: 24px 18px; } h1 { font-size: 24px; } .page-heading { margin-bottom: 24px; } .metrics { gap: 22px 12px; padding: 20px 0; } .metric-label { font-size: 11px; } .metric strong { font-size: 18px; } .flow { height: 300px; } .flow-node strong { font-size: 11px; } .flow-node small { font-size: 9px; } .flow-node { max-width: 105px; padding: 8px 2px; } .flow-node svg { width: 23px; height: 23px; } .home-node svg { width: 32px; height: 32px; } .setup-status { align-items: flex-start; flex-direction: column; gap: 16px; } .entity-toolbar { flex-direction: column; align-items: stretch; gap: 12px; } .search-field { width: 100%; } .entity-row { grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 18px 0; } .preference-fields { gap: 20px 16px; } .number-field > span { min-height: 32px; } .form-actions .primary-button { width: 100%; } footer { padding: 12px 18px 24px; font-size: 9px; } }
+
+:root {
+	--appliance-bg: var(--surface);
+	--appliance-text: var(--text);
+	--appliance-muted: var(--muted);
+	--appliance-soft: var(--page);
+	--appliance-outline: var(--line);
+	--appliance-face: var(--surface);
+	--appliance-fill: var(--green);
+	--appliance-accent: var(--yellow);
+	--battery-good: var(--green);
+	--battery-alert: #a44133;
+	--battery-flow: var(--green);
+}
+:root[data-theme="dark"] {
+	--appliance-bg: #1e4036;
+	--appliance-text: #f5faf7;
+	--appliance-muted: #bbcfc8;
+	--appliance-soft: #ffffff08;
+	--appliance-outline: #78958b;
+	--appliance-face: #0c1011;
+	--appliance-fill: #4ade80;
+	--appliance-accent: #efd044;
+	--battery-good: #4ade80;
+	--battery-alert: #f1aaa0;
+	--battery-flow: #4ade80;
+}
+.appliance-panel { background: var(--appliance-bg); color: var(--appliance-text); border: 1px solid var(--line); }
+.battery-level-settings { border-top-color: var(--line); }
+.battery-level-settings .mapping-setting span,
+.appliance-status,
+.charger-lock-control,
+.charger-limit-control,
+.appliance-measurement > span,
+.charger-phase-heading,
+.appliance-control-note,
+.battery-panel .battery-control-section > .muted,
+.battery-panel .subtitle { color: var(--appliance-muted); }
+.battery-level-settings input { background: var(--surface); border-color: var(--input-border); color: var(--text); }
+.appliance-housing { border-color: var(--appliance-outline); background: var(--appliance-soft); }
+.appliance-face { background: var(--appliance-face); }
+.charger-indicator { background: var(--appliance-muted); }
+.charger-socket { border-color: var(--appliance-outline); }
+.battery-fill { background: var(--appliance-fill); }
+.charger-lock-control button { border-color: var(--appliance-outline); color: var(--appliance-text); background: var(--appliance-soft); }
+:root .appliance-panel .primary-button { background: var(--appliance-accent); border-color: var(--appliance-accent); color: #10251d; }
+:root .appliance-panel .secondary-button { color: var(--appliance-text); background: var(--appliance-soft); border-color: var(--appliance-outline); }
+.charger-limit-control input,
+.solar-panel .solar-limit-slider { accent-color: var(--appliance-accent); }
+.appliance-measurements,
+.charger-phases { background: var(--appliance-soft); }
+.appliance-measurement { border-bottom-color: var(--line); }
+.charger-phases meter::-webkit-meter-bar { background: var(--appliance-outline); }
+.charger-phases meter::-webkit-meter-optimum-value,
+.charger-phases meter::-moz-meter-bar { background: var(--appliance-accent); }
+.appliance-footer { background: var(--appliance-soft); }
+.battery-state.charging { color: var(--battery-good); }
+.battery-state.discharging { color: var(--battery-alert); }
+.battery-level-bar { background: var(--appliance-soft); }
+.battery-level-fill { background: var(--appliance-fill); }
+.battery-node svg,
+.battery-feeding-badge { color: var(--battery-flow) !important; }
+.solar-panel { background: var(--appliance-bg); color: var(--appliance-text); }
+.solar-menu summary { background: var(--appliance-soft); color: var(--appliance-text); }
+.solar-menu[open] { background: var(--appliance-bg); border-color: var(--appliance-outline); }
+.solar-today-heading,
+.solar-panel .solar-limit-control,
+.solar-panel .solar-limit-value,
+.solar-measurement > span,
+.solar-chart-status { color: var(--appliance-muted); }
+.solar-today-total { color: var(--appliance-text); }
+.solar-panel .solar-measurement { background: var(--appliance-soft); }
