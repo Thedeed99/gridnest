@@ -1,4 +1,4 @@
-import { createIcons, Activity, Link, SlidersHorizontal, RefreshCw, HousePlug, House, Sun, Moon, Flame, Droplet, Plug, Car, Heater, BatteryCharging, Battery, Thermometer, ArrowUpRight, ArrowDownLeft, Lock, Clock3, EllipsisVertical, Power, Save, Search, Check, Unplug, Plus, Pencil, Trash2, X, ListChecks, Pause, Play, Menu, Minus, CloudLightning } from 'lucide';
+import { createIcons, Activity, Link, SlidersHorizontal, RefreshCw, HousePlug, House, Sun, Moon, Flame, Droplet, Plug, Car, Heater, BatteryCharging, Battery, Thermometer, ArrowUpRight, ArrowDownLeft, Lock, Unlock, Clock3, EllipsisVertical, Power, Save, Search, Check, Unplug, Plus, Pencil, Trash2, X, ListChecks, Pause, Play, Menu, Minus, CloudLightning } from 'lucide';
 import { Chart } from 'chart.js/auto';
 import { createId } from './ids.js';
 import { climateStatus, modeLabel, onlyRoomTargetChanged } from './status.js';
@@ -18,7 +18,7 @@ function isCompatibleEntity(role, entity) {
     (!role.deviceClasses || role.deviceClasses.includes(entity.deviceClass));
 }
 
-const icons = { Activity, Link, SlidersHorizontal, RefreshCw, HousePlug, House, Sun, Moon, Flame, Droplet, Plug, Car, Heater, BatteryCharging, Battery, Thermometer, ArrowUpRight, ArrowDownLeft, Lock, Clock3, EllipsisVertical, Power, Save, Search, Check, Unplug, Plus, Pencil, Trash2, X, ListChecks, Pause, Play, Menu, Minus, CloudLightning };
+const icons = { Activity, Link, SlidersHorizontal, RefreshCw, HousePlug, House, Sun, Moon, Flame, Droplet, Plug, Car, Heater, BatteryCharging, Battery, Thermometer, ArrowUpRight, ArrowDownLeft, Lock, Unlock, Clock3, EllipsisVertical, Power, Save, Search, Check, Unplug, Plus, Pencil, Trash2, X, ListChecks, Pause, Play, Menu, Minus, CloudLightning };
 const main = document.querySelector('#main');
 let data;
 let view = 'overview';
@@ -1483,7 +1483,7 @@ function rulesView() {
   const limits = element('details', 'control-limits');
   limits.append(element('summary', '', 'Grenzen en timing'));
   const fields = element('div', 'preference-fields');
-  for (const [key, title, min, max, step] of [['maxAgeSeconds', 'Maximale meetouderdom (seconden)', 60, 7200, 60], ['minIntervalSeconds', 'Minimale opdrachttijd (seconden)', 30, 3600, 30], ['manualHoldMinutes', 'Pauze na handmatige wijziging (minuten)', 5, 1440, 5], ['reserveSoc', 'Accureserve (%)', 10, 90, 1], ['maxSoc', 'Maximale acculading (%)', 20, 100, 1]]) {
+  for (const [key, title, min, max, step] of [['maxAgeSeconds', 'Maximale meetouderdom (seconden)', 60, 86400, 60], ['minIntervalSeconds', 'Minimale opdrachttijd (seconden)', 30, 3600, 30], ['manualHoldMinutes', 'Pauze na handmatige wijziging (minuten)', 5, 1440, 5], ['reserveSoc', 'Accureserve (%)', 10, 90, 1], ['maxSoc', 'Maximale acculading (%)', 20, 100, 1]]) {
     const label = element('label', 'mapping-setting');
     label.htmlFor = `control-${key}`;
     label.append(element('span', '', title));
@@ -2671,9 +2671,11 @@ function singleBatteryPanel(batConfig) {
       await api('battery/levels', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ batteryId: batConfig.id, min: Number(inputs.min.value), max: Number(inputs.max.value), confirm: true }) });
       pendingValues.min = String(Number(inputs.min.value));
       pendingValues.max = String(Number(inputs.max.value));
+      apply.disabled = !canApply;
       notify('Batterijniveaus verstuurd; terugmelding volgt.');
       await refresh();
-    } catch (error) { notify(error.message, true); apply.disabled = false; }
+    } catch (error) { notify(error.message, true); }
+    finally { apply.disabled = !canApply; }
   });
   panel.append(limits);
 
@@ -2817,19 +2819,29 @@ function devicePanel(kind) {
     };
     const lockControl = element('div', 'charger-lock-control');
     const lockEntity = data.entities.find(item => item.id === data.mappings.evLockStatus);
-    const lockStates = lockEntity?.domain === 'switch' ? ['on', 'off'] : ['locked', 'unlocked'];
-    const lockButton = toolButton('lock', 'Kabelvergrendeling wijzigen', () => {
-      const reading = currentLock();
-      const locked = lockStates.includes(reading?.value) && reading.value === lockStates[0];
-      confirmCommand(locked ? 'Kabel ontgrendelen' : 'Kabel vergrendelen', { action: 'lock', locked: !locked });
+    const lockState = () => {
+      const entity = data.entities.find(item => item.id === data.mappings.evLockStatus);
+      const value = currentLock()?.value;
+      if (entity?.domain === 'lock') return value === 'locked' ? 'locked' : value === 'unlocked' ? 'unlocked' : 'unknown';
+      if (['switch', 'binary_sensor'].includes(entity?.domain)) return value === 'on' ? 'locked' : value === 'off' ? 'unlocked' : 'unknown';
+      return 'unknown';
+    };
+    const lockButton = toolButton('lock', 'Kabelstatus onbekend', () => {
+      const state = lockState();
+      if (state === 'unknown') return;
+      confirmCommand(state === 'locked' ? 'Kabel ontgrendelen' : 'Kabel vergrendelen', { action: 'lock', locked: state === 'unlocked' });
     });
+    lockButton.firstElementChild.classList.add('lock-state-closed');
+    const openLockIcon = icon('unlock');
+    openLockIcon.classList.add('lock-state-open');
+    lockButton.append(openLockIcon);
     bindLive(lockButton, () => {
-      const reading = currentLock();
-      const locked = lockStates.includes(reading?.value) && reading.value === lockStates[0];
-      const label = locked ? 'Kabel ontgrendelen' : 'Kabel vergrendelen';
+      const state = lockState();
+      const label = state === 'locked' ? 'Kabel ontgrendelen' : state === 'unlocked' ? 'Kabel vergrendelen' : 'Kabelstatus onbekend';
       lockButton.title = label;
       lockButton.setAttribute('aria-label', label);
-      lockButton.disabled = !data.controlStatus?.activeAllowed || !['switch', 'lock'].includes(lockEntity?.domain);
+      lockButton.disabled = !data.controlStatus?.activeAllowed || !['switch', 'lock'].includes(lockEntity?.domain) || state === 'unknown';
+      lockButton.classList.toggle('is-unlocked', state === 'unlocked');
     });
     lockControl.append(lockButton, element('span', '', 'Kabelvergrendeling'));
     panel.append(lockControl);
@@ -2908,8 +2920,13 @@ function devicePanel(kind) {
       phases.append(phaseCell);
     }
     panel.append(phases);
-    const footer = liveText('p', 'appliance-footer', () => measurement('evLockStatus'));
-    footer.prepend(icon('lock'));
+    const footer = element('p', 'appliance-footer');
+    const footerClosedIcon = icon('lock');
+    footerClosedIcon.classList.add('lock-state-closed');
+    const footerOpenIcon = icon('unlock');
+    footerOpenIcon.classList.add('lock-state-open');
+    bindLive(footer, () => footer.classList.toggle('is-unlocked', lockState() === 'unlocked'));
+    footer.append(footerClosedIcon, footerOpenIcon, liveText('span', '', () => measurement('evLockStatus')));
     panel.append(footer);
     if (!allowed) panel.append(element('p', 'appliance-control-note', 'Handmatige bediening vereist vrijgave voor echte apparaatsturing.'));
     if (!data.mappings.evEnable || !data.mappings.evCurrentLimit) {
@@ -2944,8 +2961,7 @@ async function loadSolarChart(panel, reload = false) {
     const cumulative = isCumulativeSolarMeter(data.entities.find(entity => entity.id === data.mappings.solarToday), data.mappings.solarTodayMode);
     status.textContent = cumulative && data.mappings.solarToday && recap.solarToday?.energyKwh == null ? 'Geen geldig dagverschil: beginstand rond middernacht ontbreekt of de teller is gereset.'
       : data.mappings.solarToday && !cumulative && data.energy?.solarOutlook?.actualTodayKwh === null ? 'De gekoppelde dagopbrengst is niet beschikbaar.'
-      : !row || row.energyKwh === null ? 'Geen opbrengsthistorie beschikbaar.'
-        : !row.complete ? 'De uurgrafiek is onvolledig: er ontbreken meetpunten.' : '';
+      : !row || row.energyKwh === null ? 'Geen opbrengsthistorie beschikbaar.' : '';
     const periods = row?.periods ?? [];
     const labels = Array.from({ length: 48 }, (_, index) => `${String(Math.floor(index / 2)).padStart(2, '0')}:${index % 2 ? '30' : '00'}`);
     const values = Array.from({ length: 48 }, (_, index) => periods.find(bucket => bucket.index === index)?.energyKwh ?? null);
@@ -3152,7 +3168,7 @@ function deviceDetail(kind) {
     solarMenu.append(toolButton('refresh-cw', 'Zonneopbrengst vernieuwen', () => loadSolarChart(solarPanel, true)), setup);
     solarPanel.append(section, metrics, element('p', 'solar-chart-status', 'Opbrengsthistorie laden...'));
     main.append(solarPanel);
-    loadSolarChart(solarPanel);
+    loadSolarChart(solarPanel, true);
     return;
   }
   const hasBatterySwitch = kind === 'battery' && data.mappings.batteryEnable;

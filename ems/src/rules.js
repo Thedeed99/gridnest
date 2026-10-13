@@ -16,7 +16,7 @@ const entityId = z.string().regex(/^[a-z_]+\.[a-z0-9_]+$/);
 const actionValue = z.union([z.number().finite(), z.enum(['on', 'off', 'heat'])]);
 export const rulesSchema = z.object({
   mode: z.enum(['off', 'preview', 'active']).default('off'),
-  maxAgeSeconds: z.number().int().min(60).max(7200).default(900),
+  maxAgeSeconds: z.number().int().min(60).max(86400).default(900),
   minIntervalSeconds: z.number().int().min(30).max(3600).default(300),
   manualHoldMinutes: z.number().int().min(5).max(1440).default(60),
   reserveSoc: z.number().min(10).max(90).default(20),
