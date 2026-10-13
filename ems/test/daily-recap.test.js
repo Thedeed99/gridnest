@@ -2,8 +2,36 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { dailyEnergyRecap, dailyOverviewRows, demoDailyRecap, recapMeters, readDailyRecap } from '../src/daily-recap.js';
 import { emptyMappings } from '../src/home-assistant.js';
+import { cumulativeSolarToday, readSolarMeterToday } from '../src/solar-meter.js';
 
 const sensor = (id, state, unit = 'W') => ({ id, name: id, domain: 'sensor', state: String(state), unit, available: true });
+
+test('cumulatieve SolarEdge-meter geeft alleen verschil sinds HA-middernacht, niet levensduurtotaal', () => {
+  const now = new Date('2026-10-13T10:00:00Z');
+  const entity = sensor('sensor.solaredge_i1_ac_energy', 12504.2, 'kWh');
+  const history = [[{ last_updated: '2026-10-12T21:30:00Z', state: '12500' }, { last_updated: '2026-10-13T08:00:00Z', state: '12502' }]];
+  const result = cumulativeSolarToday(history, entity, now, 'Europe/Amsterdam');
+  assert.ok(Math.abs(result.energyKwh - 4.2) < 0.000001);
+  assert.equal(result.periodStart, '2026-10-12T22:00:00.000Z');
+  assert.equal(result.complete, true);
+  assert.equal(cumulativeSolarToday(history.slice(0).map(points => points.slice(1)), entity, now).energyKwh, null);
+  assert.equal(cumulativeSolarToday(history, { ...entity, state: '10' }, now).energyKwh, null);
+  assert.equal(cumulativeSolarToday(history, { ...entity, state: '12500' }, now).energyKwh, null);
+  assert.equal(cumulativeSolarToday([[history[0][0]]], { ...entity, state: '12500' }, now).energyKwh, 0);
+  assert.equal(cumulativeSolarToday([[{ last_updated: '2026-10-12T21:30:00Z', state: '12500000' }]], sensor(entity.id, 12504200, 'Wh'), now).energyKwh, 4.2);
+});
+
+test('cumulatieve meterhistorie gebruikt alleen GET en de gekozen entiteit met HA-tijdzone', async () => {
+  const requests = [];
+  const entity = sensor('sensor.solaredge_i1_ac_energy', 105, 'kWh');
+  const result = await readSolarMeterToday({ SUPERVISOR_TOKEN: 'fake' }, entity, async (url, options) => {
+    requests.push({ url: new URL(url), options });
+    return { ok: true, json: async () => String(url).endsWith('/config') ? { time_zone: 'Europe/Amsterdam' } : [[{ state: '100', last_updated: '2026-10-12T22:00:00Z' }]] };
+  }, new Date('2026-10-13T10:00:00Z'));
+  assert.equal(result.energyKwh, 5);
+  assert.equal(requests[1].url.searchParams.get('filter_entity_id'), entity.id);
+  assert.ok(requests.every(item => !item.options.method || item.options.method === 'GET'));
+});
 
 test('overzichtsrecap toont alleen hoofdtotale waarden, batterijrichtingen en optionele meters', () => {
   const mappings = { ...emptyMappings, totalConsumption: 'sensor.total', gridExport: 'sensor.export', evPower: 'sensor.ev', batteryMode: 'measured', batteryPower: 'sensor.battery' };

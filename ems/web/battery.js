@@ -2,6 +2,7 @@ export function batteryState(entity, powerW) {
   if (entity) {
     if (!entity.available) return { label: 'Status onbekend', powerW: null };
     const state = String(entity.state).trim().toLowerCase().replace(/[_-]+/g, ' ');
+    if (['unused', 'unusued', 'not used'].includes(state)) return { label: 'Doorvoer', powerW: 0 };
     if (['bypass', 'pass through', 'passthrough', 'doorvoer', 'doorvoeren'].includes(state)) return { label: 'Doorvoer', powerW: 0 };
     if (['charging', 'charge', 'laden'].includes(state)) return { label: 'Laden', powerW: powerW === null ? null : Math.abs(powerW) };
     if (['discharging', 'discharge', 'ontladen'].includes(state)) return { label: 'Ontladen', powerW: powerW === null ? null : -Math.abs(powerW) };

@@ -4,7 +4,7 @@ export const roles = [
   { id: 'gridImport', name: 'Netafname', domain: 'sensor', units: ['W', 'kW'], icon: 'plug', description: 'Actueel vermogen uit het net; niet een cumulatieve kWh-meter.' },
   { id: 'gridExport', name: 'Teruglevering', domain: 'sensor', units: ['W', 'kW'], icon: 'arrow-up-right', description: 'Actueel teruggeleverd vermogen, als positieve waarde.' },
   { id: 'solar', name: 'Zonnepanelen', domain: 'sensor', units: ['W', 'kW'], icon: 'sun', description: 'Actuele productie van de omvormer.' },
-  { id: 'solarToday', name: 'Zonneopbrengst vandaag', domain: 'sensor', units: ['Wh', 'kWh'], icon: 'sun', description: 'Werkelijk opgewekte energie sinds middernacht; gebruik een dagmeter, geen levensduurtotaal.' },
+  { id: 'solarToday', name: 'Zonneopbrengst vandaag', domain: 'sensor', units: ['Wh', 'kWh'], icon: 'sun', description: 'Dagmeter of cumulatieve totaalmeter; kies de juiste bron voor het dagverschil.' },
   { id: 'solarExpectedNow', name: 'Zonneverwachting nu', domain: 'sensor', units: ['W', 'kW'], icon: 'sun', description: 'Verwacht zonnevermogen op dit moment uit je forecast-integratie.' },
   { id: 'solarExpectedToday', name: 'Zonneverwachting vandaag', domain: 'sensor', units: ['kWh'], icon: 'sun', description: 'Verwachte zonneopbrengst voor vandaag uit je forecast-integratie.' },
   { id: 'temperature', name: 'Kamertemperatuur', domain: 'sensor', units: ['°C'], icon: 'thermometer', description: 'De temperatuur in de belangrijkste verblijfsruimte.' },
@@ -115,6 +115,7 @@ export const mappingsSchema = z.object({
   batteryMode: z.enum(['unknown', 'none', 'measured']).default('unknown'),
   batteryDirection: z.enum(['positive-charge', 'positive-discharge']).default('positive-charge'),
   evMode: z.enum(['unknown', 'none', 'present']).default('unknown'),
+  solarTodayMode: z.enum(['daily', 'total']).default('daily'),
   knownSource: z.enum(['individual', 'aggregate']).default('individual'),
   knownConsumers: z.array(entityIdSchema).max(50).default([]).refine(ids => new Set(ids).size === ids.length, { message: 'Een verbruiker mag maar een keer worden geselecteerd.' }),
   knownConsumerNames: z.record(entityIdSchema, z.string().trim().max(80)).default({}),
@@ -130,6 +131,7 @@ export function validateMappings(input, entities) {
     if (!id) continue;
     const entity = entities.find(item => item.id === id);
     if (!entity || !compatible(role, entity)) throw new Error(`Geen passende entiteit voor ${role.name}.`);
+    if (role.id === 'solarToday' && mappings.solarTodayMode === 'total' && !['total', 'total_increasing'].includes(entity.stateClass)) throw new Error('Zonneopbrengst uit een totaalmeter vereist een cumulatieve energie-entiteit.');
     if (['gasConsumption', 'waterConsumption', 'evEnergyTotal'].includes(role.id) && !['total', 'total_increasing'].includes(entity.stateClass)) throw new Error(`${role.name} vereist een cumulatieve meterstand.`);
   }
   if (mappings.gridImport && mappings.gridImport === mappings.gridExport) throw new Error('Netafname en teruglevering moeten afzonderlijke sensoren zijn.');
@@ -186,7 +188,7 @@ export async function readEntities(env = process.env, request = fetch) {
 export function readings(mappings, entities) {
   return roles.map(role => {
     const entity = entities.find(item => item.id === mappings[role.id]);
-    const numeric = entity && entity.domain === 'sensor';
+    const numeric = entity && entity.domain === 'sensor' && role.id !== 'batteryChargingState';
     const validNumber = !numeric || (entity.state.trim() !== '' && Number.isFinite(Number(entity.state)));
     const valid = Boolean(entity?.available && compatible(role, entity) && validNumber);
     return { role: role.id, name: role.name, entityId: mappings[role.id], valid,

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.2 - 2026-10-13
+
+- Bereken Zonneopbrengst vandaag ook uit een cumulatieve Wh/kWh-meter, met Home Assistant-tijdzone en controle op ontbrekende beginstanden en tellerresets.
+- Toon de UPS-status unused als Doorvoer en accepteer tekstwaarden voor de laadstatussensor.
+- Beheer min/max-entiteitkoppelingen uitsluitend onder Koppelingen; behoud percentagebediening op de Batterij-pagina.
+- Behoud de gekozen modus bij opslaan, wijzigen en herstarten; alleen de gebruiker wijzigt de stand van de regelaar.
+- Bedien laadkabelvergrendeling ook via switches met on/off-status, met behoud van nulvermogencontrole bij ontgrendelen.
+- Toon na kamerdoelwijzigingen of de thermostaatopdracht is verstuurd, bevestigd of geblokkeerd.
+
 ## 1.0.1 - 2026-10-13
 
 - Gebruik de gekoppelde laadstatussensor om doorvoer te onderscheiden van laden en ontladen.

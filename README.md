@@ -49,7 +49,7 @@ Open `http://localhost:8080`. De ontwikkelserver luistert standaard uitsluitend 
 
 Voor een echte Home Assistant Container-verbinding: schakel demomodus uit, stel `HA_URL` in op het API-adres (bijvoorbeeld `http://homeassistant:8123/api`) en lever `HA_TOKEN` als omgevingsvariabele aan. Zet nooit sleutels in broncode, browserinstellingen of de repository. In de add-on levert Supervisor zelf `SUPERVISOR_TOKEN` aan.
 
-Actieve sturing is in deze versie uitsluitend toegestaan via de Home Assistant-app met Supervisor en Ingress. Geef de appoptie `allow_control` expliciet vrij en controleer de regels eerst in proefmodus. Na een herstart valt actieve sturing terug naar proefmodus. Een los draaiende container kan wel monitoren en regels beoordelen, maar geen live-opdrachten uitvoeren.
+Actieve sturing is in deze versie uitsluitend toegestaan via de Home Assistant-app met Supervisor en Ingress. Geef de appoptie `allow_control` expliciet vrij en controleer de regels eerst in proefmodus. De gekozen stand blijft behouden bij opslaan en herstarten, totdat de gebruiker deze wijzigt. Actieve sturing kan na een herstart automatisch hervatten zodra apparaatvrijgave en geldige meetgegevens beschikbaar zijn. Een los draaiende container kan wel monitoren en regels beoordelen, maar geen live-opdrachten uitvoeren.
 
 Er zijn nog geen containers of echte apparaten live getest in deze ontwikkelomgeving. Gebruik de experimentele regels niet als vervanging voor fabrikantbeveiligingen, fasebeveiliging of batterij-BMS-grenzen.
 
