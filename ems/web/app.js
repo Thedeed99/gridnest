@@ -4,6 +4,7 @@ import { createId } from './ids.js';
 import { climateStatus, modeLabel } from './status.js';
 import { formatPower } from './power.js';
 import { dailyOverviewRows } from '../src/daily-recap.js';
+import { batteryState } from './battery.js';
 
 function isCompatibleEntity(role, entity) {
   if (role.id === 'evCableStatus') {
@@ -196,6 +197,14 @@ function solarOutlook(parent) {
   parent.append(section);
 }
 
+function batteryInfo(config) {
+  const entity = data.entities.find(item => item.id === config.powerEntity);
+  const raw = entity?.available && entity.state.trim() !== '' && ['W', 'kW'].includes(entity.unit) && Number.isFinite(Number(entity.state))
+    ? Number(entity.state) * (entity.unit === 'kW' ? 1000 : 1) * (config.isMain && data.mappings.batteryDirection === 'positive-discharge' ? -1 : 1) : null;
+  const status = data.entities.find(item => item.id === config.chargingStateEntity);
+  return batteryState(config.chargingStateEntity ? status ?? { available: false } : null, raw);
+}
+
 function overview() {
   const visibleRoles = data.roles.filter(role => role.id !== 'presence');
   const mapped = visibleRoles.filter(role => Boolean(data.mappings[role.id])).length;
@@ -226,8 +235,8 @@ function overview() {
     if (reading?.valid && Number.isFinite(Number(reading.value))) {
       const w = Number(reading.value) * (reading.unit === 'kW' ? 1000 : 1);
       const signedW = w * (data.mappings.batteryDirection === 'positive-discharge' ? -1 : 1);
-      totalBatW += signedW;
-      hasAnyBatPower = true;
+      const actual = batteryState(data.mappings.batteryChargingState ? data.entities.find(item => item.id === data.mappings.batteryChargingState) ?? { available: false } : null, signedW).powerW;
+      if (actual !== null) { totalBatW += actual; hasAnyBatPower = true; }
     }
   }
 
@@ -237,15 +246,15 @@ function overview() {
       const pEnt = data.entities.find(e => e.id === b.powerEntity);
       if (pEnt?.available && pEnt.state.trim() !== '' && Number.isFinite(Number(pEnt.state))) {
         const w = Number(pEnt.state) * (pEnt.unit === 'kW' ? 1000 : 1);
-        totalBatW += w;
-        hasAnyBatPower = true;
+        const actual = batteryInfo(b).powerW;
+        if (actual !== null) { totalBatW += actual; hasAnyBatPower = true; }
       }
     }
   }
 
   if (hasAnyBatPower) {
     batPowerKw = totalBatW / 1000;
-  } else if (data.demo && data.mappings?.batteryMode !== 'none') {
+  } else if (data.demo && data.mappings?.batteryMode !== 'none' && !data.mappings.batteryChargingState && !data.mappings.batteries?.some(item => item.chargingStateEntity)) {
     batPowerKw = -0.45 + 1.2 + 0; // saldo demo
   }
 
@@ -259,6 +268,12 @@ function overview() {
 
   const isBatDischarging = batPowerKw !== null && batPowerKw < -0.01;
   const isBatCharging = batPowerKw !== null && batPowerKw > 0.01;
+  const flowBatteries = [
+    ...(['batterySoc', 'batteryPower', 'batteryEnable', 'batteryInputPower', 'batteryOutputPower', 'batteryRemainingTime', 'batteryHealth', 'batteryChargingState'].some(role => data.mappings[role])
+      ? [{ powerEntity: data.mappings.batteryPower, chargingStateEntity: data.mappings.batteryChargingState, isMain: true }] : []),
+    ...(data.mappings.batteries ?? [])
+  ];
+  const hasBatteryThroughput = flowBatteries.length > 0 && flowBatteries.every(item => batteryInfo(item).label === 'Doorvoer');
   const batFlowClass = isBatDischarging ? 'flow-active-to-home' : isBatCharging ? 'flow-active-from-home' : '';
 
   // Bepaal SVG lijnen op basis van actieve knooppunten
@@ -299,8 +314,8 @@ function overview() {
     }
     const node = element('div', nodeClass);
     if (role === 'battery') {
-      const batLabel = isBatDischarging ? 'Naar woning' : isBatCharging ? 'Aan het laden' : 'Stand-by';
-      const batDisplay = batPowerKw !== null ? powerText(Math.abs(batPowerKw)) : 'Stand-by';
+      const batLabel = isBatDischarging ? 'Naar woning' : isBatCharging ? 'Aan het laden' : batPowerKw === 0 && hasBatteryThroughput ? 'Doorvoer' : batPowerKw === null ? 'Status onbekend' : 'Stand-by';
+      const batDisplay = batPowerKw !== null ? powerText(Math.abs(batPowerKw)) : 'Niet beschikbaar';
       node.append(icon(isBatDischarging ? 'arrow-up-right' : 'battery-charging'), element('span', '', title), element('strong', '', batDisplay), element('small', '', batLabel));
     } else {
       node.append(icon(name), element('span', '', title), element('strong', '', role ? measurement(role) : measurement('totalConsumption')));
@@ -467,6 +482,7 @@ function batteriesOverview() {
       name: 'Hoofdbatterij',
       socEntity: data.mappings.batterySoc,
       powerEntity: data.mappings.batteryPower,
+      chargingStateEntity: data.mappings.batteryChargingState,
       isMain: true
     });
   } else if (data.demo && !data.mappings?.batteries?.length) {
@@ -508,11 +524,12 @@ function batteriesOverview() {
       const rawW = Number(powerEntity.state) * (powerEntity.unit === 'kW' ? 1000 : 1);
       // Als het de hoofdbatterij is met specifieke batteryDirection
       powerW = item.isMain && data.mappings?.batteryDirection === 'positive-discharge' ? rawW * -1 : rawW;
-      totalWatts += powerW;
-      hasValidPower = true;
     }
 
-    let stateLabel = 'Stand-by';
+    const actualState = batteryInfo(item);
+    powerW = actualState.powerW;
+    if (powerW !== null) { totalWatts += powerW; hasValidPower = true; }
+    let stateLabel = actualState.label;
     let stateClass = 'idle';
     let powerDisplay = '0 W';
 
@@ -533,6 +550,7 @@ function batteriesOverview() {
     } else {
       powerDisplay = 'Niet beschikbaar';
     }
+    stateLabel = actualState.label;
 
     const rowHeader = element('div', 'battery-row-header');
     const identity = element('div', 'battery-identity');
@@ -1731,7 +1749,10 @@ function entities() {
           makeSelectField('Output vermogen (W / kW)', 'sensor', ['W', 'kW'], 'outputEntity'),
           makeSelectField('Resterende tijd', 'sensor', ['h', 'min', 's'], 'remainingEntity'),
           makeSelectField('State of health (%)', 'sensor', ['%'], 'healthEntity'),
-          makeSelectField('Aan/uit schakelaar', 'switch', [], 'switchEntity')
+          makeSelectField('Aan/uit schakelaar', 'switch', [], 'switchEntity'),
+          makeSelectField('Laadstatus / doorvoer', 'sensor', [], 'chargingStateEntity'),
+          makeSelectField('Minimum batterijniveau (%)', 'number', ['%'], 'minLevelEntity'),
+          makeSelectField('Maximum batterijniveau (%)', 'number', ['%'], 'maxLevelEntity')
         );
         card.append(header, fields);
         multiSec.append(card);
@@ -2160,7 +2181,7 @@ function singleBatteryPanel(batConfig) {
 
   const header = element('header', 'appliance-header');
   const copy = element('div');
-  const switchState = switchEntity?.available ? (switchEntity.state === 'on' ? 'Accu actief' : 'Stand-by') : 'Stand-by';
+  const switchState = batteryInfo(batConfig).label;
   copy.append(element('h2', '', batConfig.name || 'Thuisbatterij'), element('span', 'appliance-status', switchState));
   header.append(icon('battery-charging'), copy);
   panel.append(header);
@@ -2259,8 +2280,132 @@ function singleBatteryPanel(batConfig) {
   );
   panel.append(tiles);
 
+  const limits = element('form', 'battery-level-settings');
+  limits.append(element('h3', 'charger-phase-heading', 'Batterijniveaus (min / max %)'));
+  const limitsGrid = element('div', 'battery-limits-grid');
+  const inputs = {};
+  for (const [key, title, fallbackVal] of [['min', 'Minimum niveau (%)', '20'], ['max', 'Maximum niveau (%)', '80']]) {
+    const entityId = batConfig[`${key}LevelEntity`];
+    const entity = data.entities.find(item => item.id === entityId);
+    const label = element('label', 'mapping-setting');
+    const input = element('input', 'text-input');
+    const curVal = entity?.state && Number.isFinite(Number(entity.state)) ? Number(entity.state) : (data.demo ? Number(fallbackVal) : '');
+    Object.assign(input, {
+      type: 'number',
+      min: Math.max(0, entity?.minimum ?? 0),
+      max: Math.min(100, entity?.maximum ?? 100),
+      step: entity?.step ?? 1,
+      required: true,
+      value: curVal,
+      placeholder: entity ? `${entity.name}` : `${fallbackVal}% (niet gekoppeld)`
+    });
+    const canControl = Boolean(entity?.available && entity.domain === 'number' && data.controlStatus?.activeAllowed && data.control?.mode === 'active');
+    input.disabled = !canControl && !data.demo;
+    input.setAttribute('aria-label', `${batConfig.name}: ${title}`);
+    label.append(element('span', '', title), input);
+    inputs[key] = input;
+    limitsGrid.append(label);
+  }
+  limits.append(limitsGrid);
+
+  const actions = element('div', 'battery-limits-actions');
+  const bindings = element('details', 'battery-level-bindings');
+  bindings.append(element('summary', '', 'Niveau-entiteiten koppelen'));
+  const bindingGrid = element('div', 'battery-limits-grid');
+  const bindingInputs = {};
+  const primaryBattery = batConfig.id === 'main_battery' || batConfig.id === 'demo_main';
+  const savedBattery = primaryBattery ? null : data.mappings.batteries?.find(item => item.id === batConfig.id);
+  for (const [key, title, role] of [['min', 'Minimum niveau-entiteit', 'batteryMinLevel'], ['max', 'Maximum niveau-entiteit', 'batteryMaxLevel']]) {
+    const label = element('label', 'mapping-setting');
+    const select = element('select');
+    const selected = primaryBattery ? data.mappings[role] : savedBattery?.[`${key}LevelEntity`];
+    const empty = element('option', '', 'Niet gekoppeld');
+    empty.value = '';
+    select.append(empty);
+    const candidates = data.entities.filter(item => item.domain === 'number' && item.unit === '%');
+    for (const entity of candidates) {
+      const option = element('option', '', `${entity.name} (${entity.id})${entity.available ? '' : ' · niet beschikbaar'}`);
+      option.value = entity.id;
+      select.append(option);
+    }
+    if (selected && !candidates.some(item => item.id === selected)) {
+      const missing = element('option', '', `${selected} · niet beschikbaar`);
+      missing.value = selected;
+      select.append(missing);
+    }
+    select.value = selected ?? '';
+    select.setAttribute('aria-label', `${batConfig.name}: ${title}`);
+    select.disabled = !data.connected && !data.demo;
+    label.append(element('span', '', title), select);
+    bindingInputs[key] = select;
+    bindingGrid.append(label);
+  }
+  const saveBindings = element('button', 'secondary-button', 'Niveau-koppelingen opslaan');
+  saveBindings.type = 'button';
+  saveBindings.prepend(icon('save'));
+  saveBindings.disabled = !data.connected && !data.demo;
+  saveBindings.addEventListener('click', async () => {
+    if (bindingInputs.min.value && bindingInputs.min.value === bindingInputs.max.value) {
+      notify('Kies afzonderlijke entiteiten voor minimum en maximum.', true);
+      return;
+    }
+    const mappings = structuredClone(data.mappings);
+    if (primaryBattery) {
+      mappings.batteryMinLevel = bindingInputs.min.value || null;
+      mappings.batteryMaxLevel = bindingInputs.max.value || null;
+    } else {
+      const battery = mappings.batteries.find(item => item.id === batConfig.id);
+      if (!battery) { notify('Batterij niet meer beschikbaar.', true); return; }
+      battery.minLevelEntity = bindingInputs.min.value || null;
+      battery.maxLevelEntity = bindingInputs.max.value || null;
+    }
+    saveBindings.disabled = true;
+    try {
+      const result = await api('mappings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(mappings) });
+      data.mappings = result.mappings;
+      mappingsDraft = structuredClone(result.mappings);
+      notify('Niveau-entiteiten gekoppeld.');
+      await refresh();
+      render();
+    } catch (error) { notify(error.message, true); saveBindings.disabled = false; }
+  });
+  bindings.append(bindingGrid, saveBindings);
+  limits.append(bindings);
+  const apply = element('button', 'primary-button', 'Niveaus instellen');
+  apply.type = 'submit';
+  apply.prepend(icon('save'));
+  const canApply = (!inputs.min.disabled && !inputs.max.disabled) || data.demo;
+  apply.disabled = !canApply;
+  actions.append(apply);
+
+  if (!batConfig.minLevelEntity || !batConfig.maxLevelEntity) {
+    const connect = element('button', 'secondary-button', 'Niveau-entiteiten koppelen');
+    connect.type = 'button';
+    connect.prepend(icon('link'));
+    connect.addEventListener('click', () => { bindings.open = true; bindingInputs.min.focus(); });
+    actions.append(connect);
+  }
+  limits.append(actions);
+
+  if (!data.controlStatus?.activeAllowed || data.control?.mode !== 'active') {
+    limits.append(element('p', 'appliance-control-note', 'Niveaus instellen vereist apparaatvrijgave in Home Assistant en de stand Actief.'));
+  }
+
+  limits.addEventListener('submit', async event => {
+    event.preventDefault();
+    if (Number(inputs.min.value) >= Number(inputs.max.value)) { notify('Minimum moet lager zijn dan maximum.', true); return; }
+    apply.disabled = true;
+    try {
+      await api('battery/levels', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ batteryId: batConfig.id, min: Number(inputs.min.value), max: Number(inputs.max.value), confirm: true }) });
+      notify('Batterijniveaus verstuurd; terugmelding volgt.');
+      await refresh();
+    } catch (error) { notify(error.message, true); apply.disabled = false; }
+  });
+  panel.append(limits);
+
   if (powerEntity) {
-    panel.append(element('p', 'appliance-footer', `Batterijvermogen · ${formatEntityVal(powerEntity)}`));
+    const actual = batteryInfo(batConfig);
+    panel.append(element('p', 'appliance-footer', `Batterijvermogen · ${powerText(actual.powerW === null ? null : actual.powerW / 1000)}`));
   }
 
   return panel;
@@ -2274,6 +2419,10 @@ function devicePanel(kind) {
       main.append(singleBatteryPanel({
         id: 'main_battery',
         name: 'Hoofdbatterij',
+        isMain: true,
+        chargingStateEntity: data.mappings.batteryChargingState || (data.demo ? 'sensor.ups_battery_charging_state' : null),
+        minLevelEntity: data.mappings.batteryMinLevel || (data.demo ? 'number.ups_min_charge_level' : null),
+        maxLevelEntity: data.mappings.batteryMaxLevel || (data.demo ? 'number.ups_max_charge_level' : null),
         socEntity: data.mappings.batterySoc,
         powerEntity: data.mappings.batteryPower,
         switchEntity: data.mappings.batteryEnable,
@@ -2294,6 +2443,10 @@ function devicePanel(kind) {
       main.append(singleBatteryPanel({
         id: 'demo_main',
         name: 'Hoofdbatterij',
+        isMain: true,
+        chargingStateEntity: 'sensor.ups_battery_charging_state',
+        minLevelEntity: 'number.ups_min_charge_level',
+        maxLevelEntity: 'number.ups_max_charge_level',
         socEntity: 'sensor.demo_battery_soc',
         powerEntity: 'sensor.demo_battery_power',
         switchEntity: 'switch.demo_battery_enable',

@@ -20,6 +20,28 @@ const thermalConfig = () => ({
   rooms: [{ id: 'living', name: 'Woonkamer', floor: 'Begane grond', temperatureEntity: 'sensor.demo_temperature', presenceEntity: 'binary_sensor.demo_presence', targetC: 21, sourceIds: ['cv', 'airco'] }]
 });
 
+test('batterijniveaus bedienen uitsluitend de gekoppelde entiteiten met geldige grenzen', async context => {
+  const commands = [];
+  const { url, store } = await fixture(context, {
+    demo: false, supervisor: true, isIngressRequest: () => true,
+    entitiesProvider: async () => ({ connected: true, entities: demoEntities() }),
+    runner: { status: () => ({ activeAllowed: true }) },
+    evCommandProvider: async command => commands.push(command)
+  });
+  await store.update({ mappings: { ...emptyMappings, batteryMode: 'measured', batteryMinLevel: 'number.ups_min_charge_level', batteryMaxLevel: 'number.ups_max_charge_level', batteries: [{ id: 'extra', name: 'Extra', minLevelEntity: 'number.ups_min_charge_level', maxLevelEntity: 'number.ups_max_charge_level' }] }, control: { ...defaultRules, mode: 'preview' } });
+  const send = (batteryId, min, max) => fetch(`${url}/api/battery/levels`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ batteryId, min, max, confirm: true }) });
+  assert.equal((await send('main_battery', 30, 90)).status, 403);
+  await store.update({ control: { ...defaultRules, mode: 'active' } });
+  assert.equal((await send('main_battery', 90, 30)).status, 400);
+  assert.equal((await send('main_battery', 30.5, 90)).status, 409);
+  assert.equal((await send('missing', 30, 90)).status, 409);
+  assert.equal(commands.length, 0);
+  assert.equal((await send('main_battery', 30, 90)).status, 200);
+  assert.equal((await send('extra', 30, 90)).status, 200);
+  assert.equal(commands.length, 4);
+  assert.deepEqual(commands[0], { entityId: 'number.ups_min_charge_level', service: 'number.set_value', value: 30 });
+});
+
 test('startup logs the underlying initialization error', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'gridnest-startup-test-'));
   const dataPath = join(directory, 'data');

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.1 - 2026-10-13
+
+- Gebruik de gekoppelde laadstatussensor om doorvoer te onderscheiden van laden en ontladen.
+- Toon Doorvoer in Energiestromen alleen als alle gekoppelde batterijen doorvoer melden en het netto batterijvermogen nul is.
+- Koppel minimum- en maximumniveau-entiteiten rechtstreeks op de Batterij-pagina, per batterij.
+- Stel batterijniveaus in via de gekoppelde percentage-entiteiten, met apparaatvrijgave, actieve modus en controle op grenzen en stapgrootte.
+
 ## 1.0.0 - 2026-10-13
 
 Eerste stabiele release van Gridnest voor Home Assistant.
