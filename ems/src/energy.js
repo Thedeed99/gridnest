@@ -1,3 +1,5 @@
+import { isCumulativeSolarMeter } from './solar-meter.js';
+
 function powerKw(entity, signed = false) {
   if (!entity?.available || entity.domain !== 'sensor' || !['W', 'kW'].includes(entity.unit) || entity.state.trim() === '') return null;
   const value = Number(entity.state);
@@ -21,7 +23,7 @@ export function energySummary(mappings, entities) {
   const exportKw = signedGrid ? netKw === null ? null : Math.max(0, -netKw) : get('gridExport');
   const solarKw = get('solar');
   const todayEntity = find(mappings.solarToday);
-  const todayValue = mappings.solarTodayMode !== 'total' && todayEntity?.available && todayEntity.domain === 'sensor' && ['Wh', 'kWh'].includes(todayEntity.unit) && todayEntity.state.trim() !== '' ? Number(todayEntity.state) : null;
+  const todayValue = !isCumulativeSolarMeter(todayEntity, mappings.solarTodayMode) && todayEntity?.available && todayEntity.domain === 'sensor' && ['Wh', 'kWh'].includes(todayEntity.unit) && todayEntity.state.trim() !== '' ? Number(todayEntity.state) : null;
   const expectedTodayEntity = find(mappings.solarExpectedToday);
   const expectedTodayValue = expectedTodayEntity && expectedTodayEntity.available && expectedTodayEntity.unit === 'kWh' ? Number(expectedTodayEntity.state) : null;
   const solarOutlook = {

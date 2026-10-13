@@ -62,7 +62,7 @@ export const thermalSchema = z.object({
     id: itemIdSchema, name: z.string().trim().min(1).max(80),
     floor: z.string().trim().min(1).max(80), temperatureEntity: entityIdSchema,
     presenceEntity: entityIdSchema, targetC: z.number().min(12).max(26),
-    presenceControl: z.boolean().default(false),
+    presenceControl: z.boolean().default(false), awayC: z.number().min(12).max(24).nullable().default(null),
     sourceIds: z.array(itemIdSchema).max(20)
   }).strict()).max(80)
 }).strict().superRefine((thermal, context) => {

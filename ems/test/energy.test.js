@@ -150,3 +150,9 @@ test('gekoppelde zonne-dagopbrengst normaliseert Wh en kWh zonder ontbrekende wa
   assert.equal(value(sensor('sensor.solar_today', 210, 'W')), null);
   assert.equal(value(), null);
 });
+
+test('cumulatieve total_increasing zonne-meter toont geen levensduurtotaal als dagopbrengst', () => {
+  const mappings = { ...emptyMappings, solarToday: 'sensor.solar_total', solarTodayMode: 'daily' };
+  const result = energySummary(mappings, [{ ...sensor('sensor.solar_total', 12345, 'kWh'), stateClass: 'total_increasing' }]);
+  assert.equal(result.solarOutlook.actualTodayKwh, null);
+});

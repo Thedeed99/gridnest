@@ -20,12 +20,12 @@ test('onbekende aanwezigheid wordt niet als iedereen afwezig beschouwd', () => {
   assert.equal(householdPresence(defaultPreferences, []).occupied, null);
 });
 
-test('iedereen thuis is een expliciete andere keuze en oude meldingen blijven onbekend', () => {
+test('iedereen thuis is een expliciete andere keuze en een beschikbare status heeft geen timer', () => {
   const all = { ...preferences, presenceMode: 'all' };
   assert.equal(householdPresence(all, [person('person.first', 'home'), person('person.second', 'home')]).occupied, true);
   assert.equal(householdPresence(all, [person('person.first', 'home'), person('person.second', 'not_home')]).occupied, false);
   assert.equal(householdPresence(all, [person('person.first', 'home')]).occupied, null);
-  assert.equal(householdPresence(preferences, [person('person.first', 'home', { reportedAt: '2026-10-11T00:00:00Z' })], now).occupied, null);
+  assert.equal(householdPresence(preferences, [person('person.first', 'home', { reportedAt: '2026-10-11T00:00:00Z' })], now).occupied, true);
 });
 
 test('Home Assistant personen worden ingelezen en dubbele keuzen geweigerd', () => {
