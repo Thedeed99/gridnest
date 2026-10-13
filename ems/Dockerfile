@@ -4,6 +4,7 @@ COPY package.json package-lock.json ./
 RUN npm ci
 COPY web ./web
 COPY src/daily-recap.js ./src/daily-recap.js
+COPY src/solar-meter.js ./src/solar-meter.js
 COPY public/index.html ./public/index.html
 RUN npm run build && npm prune --omit=dev
 
