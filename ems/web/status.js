@@ -1,3 +1,9 @@
+export function onlyRoomTargetChanged(previous, next) {
+  const { targetC: previousTarget, ...previousSettings } = previous;
+  const { targetC: nextTarget, ...nextSettings } = next;
+  return previousTarget !== nextTarget && JSON.stringify(previousSettings) === JSON.stringify(nextSettings);
+}
+
 export function modeLabel({ demo, activeAllowed, mode }) {
   if (demo) return 'Demomodus';
   if (mode === 'active') return activeAllowed ? 'Actieve regels' : 'Actieve regels geblokkeerd';

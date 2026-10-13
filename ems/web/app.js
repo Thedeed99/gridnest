@@ -1,7 +1,7 @@
 import { createIcons, Activity, Link, SlidersHorizontal, RefreshCw, HousePlug, House, Sun, Moon, Flame, Droplet, Plug, Car, Heater, BatteryCharging, Battery, Thermometer, ArrowUpRight, ArrowDownLeft, Lock, Clock3, EllipsisVertical, Power, Save, Search, Check, Unplug, Plus, Pencil, Trash2, X, ListChecks, Pause, Play, Menu, Minus, CloudLightning } from 'lucide';
 import { Chart } from 'chart.js/auto';
 import { createId } from './ids.js';
-import { climateStatus, modeLabel } from './status.js';
+import { climateStatus, modeLabel, onlyRoomTargetChanged } from './status.js';
 import { formatPower } from './power.js';
 import { dailyOverviewRows } from '../src/daily-recap.js';
 import { batteryState } from './battery.js';
@@ -620,7 +620,8 @@ async function loadDailyRecap(container, reload = false, filter = null) {
     const solarActual = document.querySelector('#solar-actual-today');
     if (solarActual) {
       const solarRow = recap.rows.find(row => row.label === 'Zonnepanelen');
-      solarActual.textContent = solarDayText(solarRow);
+      solarActual.textContent = solarDayText(solarRow, recap.solarToday);
+      if (data.mappings.solarTodayMode === 'total' && recap.solarToday?.energyKwh == null) solarActual.title = 'Beginstand rond middernacht ontbreekt, of de teller is ongeldig of gereset.';
     }
     const rows = filter ? recap.rows.filter(row => filter(row)).map(row => ({ label: row.label, value: row.energyKwh, unit: 'kWh', complete: row.complete }))
       : dailyOverviewRows(recap, data.mappings, utilities);
@@ -698,12 +699,12 @@ function roomCard(room, config, live, compact = false) {
     if (targetRoom) {
       targetRoom.targetC = nextTarget;
       try {
-        await api('thermal', {
+        const result = await api('thermal', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json', 'X-Gridnest-Confirm-Control': 'true' },
           body: JSON.stringify(nextConfig)
         });
-        notify(`Doel ${room.name} aangepast naar ${number(nextTarget)} °C.`);
+        reportRoomTarget(room.id, result);
         await refresh();
       } catch (err) {
         notify(err.message, true);
@@ -855,12 +856,25 @@ function thermal() {
   main.append(statusSection);
 }
 
+function reportRoomTarget(roomId, result) {
+  const config = result.thermal;
+  if (config.mode !== 'active') { notify(`Kamerdoel opgeslagen; Warmte staat op ${{ off: 'Uit', preview: 'Proefmodus' }[config.mode] ?? config.mode} en stuurt niet.`); return; }
+  const sources = config.sources.filter(source => source.controlRoomId === roomId && source.controlEnabled);
+  const decisions = (result.controlStatus?.decisions ?? []).filter(decision => sources.some(source => source.id === decision.sourceId));
+  const blocked = decisions.find(decision => ['blocked', 'paused', 'waiting'].includes(decision.status));
+  if (blocked) { notify(`Kamerdoel opgeslagen; ${blocked.reason}`, true); return; }
+  if (decisions.some(decision => decision.status === 'sent')) { notify('Doeltemperatuur naar thermostaat verstuurd; terugmelding volgt.'); return; }
+  if (decisions.length && decisions.every(decision => decision.status === 'stable')) { notify('Doeltemperatuur bevestigd door thermostaat.'); return; }
+  notify('Kamerdoel opgeslagen; kies een vrijgegeven warmtebron met deze kamer als regelkamer.', true);
+}
+
 async function saveThermal(config, confirmActive = false) {
   const result = await api('thermal', { method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-Gridnest-Confirm-Control': String(confirmActive) }, body: JSON.stringify(config) });
   data.thermal = result.thermal;
   if (result.controlStatus) data.controlStatus = result.controlStatus;
   await refresh();
   render();
+  return result;
 }
 
 function editThermal(kind, id = null, floor = '') {
@@ -1045,7 +1059,6 @@ function editThermal(kind, id = null, floor = '') {
           next.sources = next.sources.filter(source => source.id !== id);
           next.rooms = next.rooms.map(room => ({ ...room, sourceIds: room.sourceIds.filter(sourceId => sourceId !== id) }));
         }
-        if (next.mode === 'active') next.mode = 'preview';
         await saveThermal(next);
         dialog.close();
         notify('Verwijderd.');
@@ -1086,11 +1099,11 @@ function editThermal(kind, id = null, floor = '') {
       const key = isRoom ? 'rooms' : 'sources';
       next[key] = id ? next[key].map(existing => existing.id === id ? item : existing) : [...next[key], item];
       if (isRoom) next.sources = next.sources.map(source => source.controlRoomId === item.id && !item.sourceIds.includes(source.id) ? { ...source, controlRoomId: null, controlEnabled: false, confirmed: false } : source);
-      if (next.mode === 'active') next.mode = 'preview';
-      if (!isRoom && item.controlEnabled && (next.mode ?? 'off') === 'off') next.mode = 'preview';
-      await saveThermal(next);
+      const targetOnly = isRoom && original && onlyRoomTargetChanged(original, item);
+      const result = await saveThermal(next, targetOnly && next.mode === 'active');
       dialog.close();
-      notify(isRoom ? 'Kamer opgeslagen.' : 'Warmtebron opgeslagen.');
+      if (targetOnly) reportRoomTarget(item.id, result);
+      else notify(isRoom ? 'Kamer opgeslagen.' : 'Warmtebron opgeslagen.');
     } catch (error) {
       errorMessage.textContent = error.message;
       errorMessage.hidden = false;
@@ -1224,9 +1237,8 @@ function rulesView() {
     enabled.addEventListener('change', async () => {
       enabled.disabled = true;
       const next = structuredClone(data.control);
-      next.mode = 'preview';
       next.rules = next.rules.map(item => item.id === rule.id ? { ...item, enabled: enabled.checked } : item);
-      try { await saveRules(next); notify('Regel bijgewerkt in proefmodus.'); } catch (error) { enabled.checked = rule.enabled; enabled.disabled = false; notify(error.message, true); }
+      try { await saveRules(next); notify('Regel bijgewerkt.'); } catch (error) { enabled.checked = rule.enabled; enabled.disabled = false; notify(error.message, true); }
     });
     label.append(enabled, element('h3', '', rule.name));
     const tools = element('div', 'rule-tools');
@@ -1469,7 +1481,7 @@ function editRule(id = null, presetType = 'ev_enable') {
     const remove = toolButton('trash-2', 'Regel verwijderen', async () => {
       if (!deleting) { deleting = true; remove.setAttribute('aria-label', 'Definitief verwijderen'); remove.title = 'Definitief verwijderen'; remove.classList.add('confirm-delete'); error.textContent = 'Deze regel verwijderen? Bevestig met de verwijderknop.'; error.hidden = false; return; }
       remove.disabled = save.disabled = true;
-      try { const next = structuredClone(data.control); next.mode = 'preview'; next.rules = next.rules.filter(rule => rule.id !== id); await saveRules(next); dialog.close(); notify('Regel verwijderd.'); }
+      try { const next = structuredClone(data.control); next.rules = next.rules.filter(rule => rule.id !== id); await saveRules(next); dialog.close(); notify('Regel verwijderd.'); }
       catch (failure) { error.textContent = failure.message; error.hidden = false; remove.disabled = save.disabled = false; }
     }); actions.append(remove);
   }
@@ -1477,9 +1489,9 @@ function editRule(id = null, presetType = 'ev_enable') {
   form.addEventListener('submit', async event => {
     event.preventDefault(); save.disabled = true; error.hidden = true;
     try {
-      const next = structuredClone(data.control); next.mode = 'preview';
+      const next = structuredClone(data.control);
       next.rules = id ? next.rules.map(rule => rule.id === id ? draft : rule) : [...next.rules, draft];
-      await saveRules(next); dialog.close(); notify('Regel opgeslagen in proefmodus.');
+      await saveRules(next); dialog.close(); notify('Regel opgeslagen.');
     } catch (failure) { error.textContent = failure.message; error.hidden = false; save.disabled = false; }
   });
   dialog.append(form); dialog.addEventListener('close', () => dialog.remove()); document.body.append(dialog); createIcons({ icons }); dialog.showModal(); name.focus();
@@ -1596,6 +1608,7 @@ function entities() {
   mappingSetting('batteryMode', 'Batterij in de woning', [['unknown', 'Nog niet aangegeven'], ['none', 'Geen batterij aanwezig'], ['measured', 'Batterij aanwezig, vermogen meten']]);
   if (mappingsDraft.batteryMode === 'measured') mappingSetting('batteryDirection', 'Tekenrichting batterijvermogen', [['positive-charge', 'Positief = laden; negatief = ontladen'], ['positive-discharge', 'Positief = ontladen; negatief = laden']]);
   mappingSetting('evMode', 'Laadpaal bij de woning', [['unknown', 'Nog niet aangegeven'], ['none', 'Geen laadpaal aanwezig'], ['present', 'Laadpaal aanwezig']]);
+  mappingSetting('solarTodayMode', 'Bron zonneopbrengst vandaag', [['daily', 'Dagmeter (reset dagelijks)'], ['total', 'Cumulatieve totaalmeter (verschil sinds middernacht)']]);
   mappingSetting('knownSource', 'Bekende verbruikers', [['individual', 'Afzonderlijke apparaatmetingen optellen'], ['aggregate', 'Eén bestaande bekende-verbruikstotaalsensor']]);
   form.append(settings);
   const toolbar = element('div', 'entity-toolbar');
@@ -2309,68 +2322,6 @@ function singleBatteryPanel(batConfig) {
   limits.append(limitsGrid);
 
   const actions = element('div', 'battery-limits-actions');
-  const bindings = element('details', 'battery-level-bindings');
-  bindings.append(element('summary', '', 'Niveau-entiteiten koppelen'));
-  const bindingGrid = element('div', 'battery-limits-grid');
-  const bindingInputs = {};
-  const primaryBattery = batConfig.id === 'main_battery' || batConfig.id === 'demo_main';
-  const savedBattery = primaryBattery ? null : data.mappings.batteries?.find(item => item.id === batConfig.id);
-  for (const [key, title, role] of [['min', 'Minimum niveau-entiteit', 'batteryMinLevel'], ['max', 'Maximum niveau-entiteit', 'batteryMaxLevel']]) {
-    const label = element('label', 'mapping-setting');
-    const select = element('select');
-    const selected = primaryBattery ? data.mappings[role] : savedBattery?.[`${key}LevelEntity`];
-    const empty = element('option', '', 'Niet gekoppeld');
-    empty.value = '';
-    select.append(empty);
-    const candidates = data.entities.filter(item => item.domain === 'number' && item.unit === '%');
-    for (const entity of candidates) {
-      const option = element('option', '', `${entity.name} (${entity.id})${entity.available ? '' : ' · niet beschikbaar'}`);
-      option.value = entity.id;
-      select.append(option);
-    }
-    if (selected && !candidates.some(item => item.id === selected)) {
-      const missing = element('option', '', `${selected} · niet beschikbaar`);
-      missing.value = selected;
-      select.append(missing);
-    }
-    select.value = selected ?? '';
-    select.setAttribute('aria-label', `${batConfig.name}: ${title}`);
-    select.disabled = !data.connected && !data.demo;
-    label.append(element('span', '', title), select);
-    bindingInputs[key] = select;
-    bindingGrid.append(label);
-  }
-  const saveBindings = element('button', 'secondary-button', 'Niveau-koppelingen opslaan');
-  saveBindings.type = 'button';
-  saveBindings.prepend(icon('save'));
-  saveBindings.disabled = !data.connected && !data.demo;
-  saveBindings.addEventListener('click', async () => {
-    if (bindingInputs.min.value && bindingInputs.min.value === bindingInputs.max.value) {
-      notify('Kies afzonderlijke entiteiten voor minimum en maximum.', true);
-      return;
-    }
-    const mappings = structuredClone(data.mappings);
-    if (primaryBattery) {
-      mappings.batteryMinLevel = bindingInputs.min.value || null;
-      mappings.batteryMaxLevel = bindingInputs.max.value || null;
-    } else {
-      const battery = mappings.batteries.find(item => item.id === batConfig.id);
-      if (!battery) { notify('Batterij niet meer beschikbaar.', true); return; }
-      battery.minLevelEntity = bindingInputs.min.value || null;
-      battery.maxLevelEntity = bindingInputs.max.value || null;
-    }
-    saveBindings.disabled = true;
-    try {
-      const result = await api('mappings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(mappings) });
-      data.mappings = result.mappings;
-      mappingsDraft = structuredClone(result.mappings);
-      notify('Niveau-entiteiten gekoppeld.');
-      await refresh();
-      render();
-    } catch (error) { notify(error.message, true); saveBindings.disabled = false; }
-  });
-  bindings.append(bindingGrid, saveBindings);
-  limits.append(bindings);
   const apply = element('button', 'primary-button', 'Niveaus instellen');
   apply.type = 'submit';
   apply.prepend(icon('save'));
@@ -2378,13 +2329,6 @@ function singleBatteryPanel(batConfig) {
   apply.disabled = !canApply;
   actions.append(apply);
 
-  if (!batConfig.minLevelEntity || !batConfig.maxLevelEntity) {
-    const connect = element('button', 'secondary-button', 'Niveau-entiteiten koppelen');
-    connect.type = 'button';
-    connect.prepend(icon('link'));
-    connect.addEventListener('click', () => { bindings.open = true; bindingInputs.min.focus(); });
-    actions.append(connect);
-  }
   limits.append(actions);
 
   if (!data.controlStatus?.activeAllowed || data.control?.mode !== 'active') {
@@ -2539,9 +2483,11 @@ function devicePanel(kind) {
       dialog.showModal();
     };
     const lockControl = element('div', 'charger-lock-control');
-    const locked = lock?.value === 'locked';
+    const lockEntity = data.entities.find(item => item.id === data.mappings.evLockStatus);
+    const lockStates = lockEntity?.domain === 'switch' ? ['on', 'off'] : ['locked', 'unlocked'];
+    const locked = lock?.value === lockStates[0];
     const lockButton = toolButton('lock', locked ? 'Kabel ontgrendelen' : 'Kabel vergrendelen', () => confirmCommand(locked ? 'Kabel ontgrendelen' : 'Kabel vergrendelen', { action: 'lock', locked: !locked }));
-    lockButton.disabled = !allowed || !lock?.valid || !['locked', 'unlocked'].includes(lock.value);
+    lockButton.disabled = !allowed || !lock?.valid || !['switch', 'lock'].includes(lockEntity?.domain) || !lockStates.includes(lock.value);
     lockControl.append(lockButton, element('span', '', 'Kabelvergrendeling'));
     panel.append(lockControl);
     const charging = enabled?.value === 'on';
@@ -2605,8 +2551,8 @@ function devicePanel(kind) {
 
 const solarEnergyText = value => `${new Intl.NumberFormat('nl-NL', { maximumFractionDigits: 2 }).format(value)} kWh`;
 
-function solarDayText(row) {
-  const value = data.mappings.solarToday ? data.energy?.solarOutlook?.actualTodayKwh : row?.energyKwh;
+function solarDayText(row, solarMeter = null) {
+  const value = data.mappings.solarToday ? data.mappings.solarTodayMode === 'total' ? solarMeter?.energyKwh : data.energy?.solarOutlook?.actualTodayKwh : row?.energyKwh;
   if (value === null || value === undefined) return 'Niet beschikbaar';
   return `${solarEnergyText(value)}${!data.mappings.solarToday && !row.complete ? ' (schatting)' : ''}`;
 }
@@ -2617,10 +2563,11 @@ async function loadSolarChart(panel, reload = false) {
     const recap = await dailyHistory(reload);
     if (!panel.isConnected) return;
     const row = recap.rows.find(item => item.label === 'Zonnepanelen');
-    const text = solarDayText(row);
+    const text = solarDayText(row, recap.solarToday);
     panel.querySelector('.solar-today-total').textContent = text;
     panel.querySelector('#solar-actual-today').textContent = text;
-    status.textContent = data.mappings.solarToday && data.energy?.solarOutlook?.actualTodayKwh === null ? 'De gekoppelde dagopbrengst is niet beschikbaar.'
+    status.textContent = data.mappings.solarTodayMode === 'total' && data.mappings.solarToday && recap.solarToday?.energyKwh == null ? 'Geen geldig dagverschil: beginstand rond middernacht ontbreekt of de teller is gereset.'
+      : data.mappings.solarToday && data.mappings.solarTodayMode !== 'total' && data.energy?.solarOutlook?.actualTodayKwh === null ? 'De gekoppelde dagopbrengst is niet beschikbaar.'
       : !row || row.energyKwh === null ? 'Geen opbrengsthistorie beschikbaar.'
         : !row.complete ? 'De uurgrafiek is onvolledig: er ontbreken meetpunten.' : '';
     const canvas = panel.querySelector('canvas');

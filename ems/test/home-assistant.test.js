@@ -1,3 +1,13 @@
+test('UPS laadstatus accepteert tekst zoals unused zonder onbeschikbaar te worden', () => {
+  const entities = normalizeStates([state('sensor.ups_battery_charging_state', '', 'unused')]);
+  const mappings = validateMappings({ ...emptyMappings, batteryChargingState: 'sensor.ups_battery_charging_state' }, entities);
+  const reading = readings(mappings, entities).find(item => item.role === 'batteryChargingState');
+  assert.equal(reading.valid, true);
+  assert.equal(reading.value, 'unused');
+  entities[0].available = false;
+  assert.equal(readings(mappings, entities).find(item => item.role === 'batteryChargingState').valid, false);
+});
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { compatible, emptyMappings, normalizeStates, readEntities, readings, roles, validateMappings } from '../src/home-assistant.js';

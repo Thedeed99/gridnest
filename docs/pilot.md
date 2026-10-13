@@ -24,7 +24,7 @@ Dit is een experimentele broninstallatie, geen Store-goedkeuring of gevalideerde
 
 Geef de appoptie voor echte sturing alleen vrij na controle van apparaatvoorwaarden, fabrikantveiligheden, minimumdraaitijden en de werking van elke geselecteerde entiteit. Activeer in Gridnest een enkele bron of regel en bevestig de activering. Observeer het echte apparaat, niet alleen de API-response.
 
-Controleer temperatuurdoel-terugmelding voordat verwarmmodus wordt ingeschakeld. Test pauze en communicatiefouten. Na appherstart moet actieve regeling proefmodus worden en mag niet vanzelf hervatten. Pauze herstelt niet automatisch eerdere apparaatwaarden; laat de eigen thermostaat en fabrieksbeveiligingen actief.
+Controleer temperatuurdoel-terugmelding voordat verwarmmodus wordt ingeschakeld. Test pauze en communicatiefouten. Na appherstart blijft de gekozen modus behouden; Actief kan automatisch hervatten zodra apparaatvrijgave en geldige meetgegevens beschikbaar zijn. Kies zelf Uit of Proefmodus als hervatten niet gewenst is. Pauze herstelt niet automatisch eerdere apparaatwaarden; laat de eigen thermostaat en fabrieksbeveiligingen actief.
 
 ## Releasebesluit
 

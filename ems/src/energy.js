@@ -21,7 +21,7 @@ export function energySummary(mappings, entities) {
   const exportKw = signedGrid ? netKw === null ? null : Math.max(0, -netKw) : get('gridExport');
   const solarKw = get('solar');
   const todayEntity = find(mappings.solarToday);
-  const todayValue = todayEntity?.available && todayEntity.domain === 'sensor' && ['Wh', 'kWh'].includes(todayEntity.unit) && todayEntity.state.trim() !== '' ? Number(todayEntity.state) : null;
+  const todayValue = mappings.solarTodayMode !== 'total' && todayEntity?.available && todayEntity.domain === 'sensor' && ['Wh', 'kWh'].includes(todayEntity.unit) && todayEntity.state.trim() !== '' ? Number(todayEntity.state) : null;
   const expectedTodayEntity = find(mappings.solarExpectedToday);
   const expectedTodayValue = expectedTodayEntity && expectedTodayEntity.available && expectedTodayEntity.unit === 'kWh' ? Number(expectedTodayEntity.state) : null;
   const solarOutlook = {

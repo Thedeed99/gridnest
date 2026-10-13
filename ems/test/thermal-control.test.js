@@ -5,6 +5,7 @@ import { defaultRules } from '../src/rules.js';
 import { planThermal, validateThermal } from '../src/thermal.js';
 import { solarTarget } from '../src/thermal-solar.js';
 import { createRuleRunner } from '../src/rule-runner.js';
+import { onlyRoomTargetChanged } from '../web/status.js';
 
 const now = Date.parse('2026-10-12T10:00:00Z');
 function fixture() {
@@ -147,6 +148,27 @@ test('Warmte is aangesloten op de uitvoerlaag, onafhankelijk van Stroom', async 
   input.entities[1].targetTemperature = 21;
   await runner.tick();
   assert.equal(sent[1].service, 'climate.set_hvac_mode');
+});
+
+test('alleen kamerdoel wijzigen behoudt regeling en stuurt het nieuwe climate-doel', async () => {
+  const input = fixture();
+  input.thermal.mode = 'active';
+  input.entities[1].state = 'heat';
+  input.entities[1].targetTemperature = 21;
+  input.entities[1].changedAt = new Date(now - 3600000).toISOString();
+  const room = input.thermal.rooms[0];
+  assert.equal(onlyRoomTargetChanged(room, { ...room, targetC: 22 }), true);
+  assert.equal(onlyRoomTargetChanged(room, { ...room, targetC: 22, presenceControl: true }), false);
+  assert.equal(onlyRoomTargetChanged(room, { ...room, targetC: 22, temperatureEntity: 'sensor.other' }), false);
+  const snapshot = { control: defaultRules, thermal: input.thermal, mappings: {}, preferences: {} };
+  const sent = [];
+  const runner = createRuleRunner({ store: { get: () => structuredClone(snapshot) }, provider: async () => ({ connected: true, entities: input.entities }), unitProvider: async () => '°C', execute: async command => sent.push(command), activeAllowed: true, clock: () => now });
+  await runner.tick();
+  assert.equal(sent.length, 0);
+  snapshot.thermal.rooms[0].targetC = 22;
+  await runner.tick();
+  assert.deepEqual(sent[0], { entityId: 'climate.cv', service: 'climate.set_temperature', value: 22 });
+  assert.equal((await runner.tick()).decisions[0].status, 'waiting');
 });
 
 test('proefmodus stuurt niets en dubbele thermostaatbediening wordt geblokkeerd', async () => {

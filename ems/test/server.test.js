@@ -42,6 +42,62 @@ test('batterijniveaus bedienen uitsluitend de gekoppelde entiteiten met geldige 
   assert.deepEqual(commands[0], { entityId: 'number.ups_min_charge_level', service: 'number.set_value', value: 30 });
 });
 
+test('serverherstart behoudt actief voor Warmte en Stroom zonder demosturing', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'gridnest-mode-restart-'));
+  try {
+    const store = await createStore(directory, 'demo');
+    await store.update({ control: { ...defaultRules, mode: 'active' }, thermal: { ...thermalConfig(), mode: 'active' } });
+    const serverModule = new URL('../src/server.js', import.meta.url).href;
+    const storeModule = new URL('../src/store.js', import.meta.url).href;
+    const script = `import { startServer } from ${JSON.stringify(serverModule)}; import { createStore } from ${JSON.stringify(storeModule)};
+      const server = await startServer({ DEMO_MODE: 'true', DATA_DIR: process.env.DATA_DIR, HOST: '127.0.0.2' });
+      await new Promise(resolve => server.once('listening', resolve));
+      const store = await createStore(process.env.DATA_DIR, 'demo');
+      console.log('modes=' + store.get().control.mode + ',' + store.get().thermal.mode);
+      await new Promise(resolve => server.close(resolve));`;
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], { env: { ...process.env, DATA_DIR: directory }, encoding: 'utf8', timeout: 10000 });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /modes=active,active/);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('actieve instellingen opnieuw opslaan behoudt modus en vereist nog steeds apparaatvrijgave', async context => {
+  let activeAllowed = true;
+  const { url, store } = await fixture(context, {
+    demo: false, supervisor: true, isIngressRequest: () => true,
+    entitiesProvider: async () => ({ connected: true, entities: demoEntities() }),
+    runner: { status: () => ({ activeAllowed }), tick: async () => {} }
+  });
+  await store.update({ control: { ...defaultRules, mode: 'active' }, thermal: { ...thermalConfig(), mode: 'active' } });
+  const save = (path, body) => fetch(`${url}/api/${path}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const thermal = store.get().thermal;
+  thermal.rooms[0].targetC = 22;
+  assert.equal((await save('thermal', thermal)).status, 200);
+  assert.equal(store.get().thermal.mode, 'active');
+  assert.equal(store.get().thermal.rooms[0].targetC, 22);
+  assert.equal((await save('rules', { control: store.get().control })).status, 200);
+  activeAllowed = false;
+  assert.equal((await save('thermal', thermal)).status, 403);
+  assert.equal((await save('rules', { control: store.get().control })).status, 403);
+  assert.equal(store.get().control.mode, 'active');
+});
+
+test('SolarEdge totaalmeter levert dagverschil zonder levensduurtotaal als dagmeter te tonen', async context => {
+  let entityId;
+  const { url, store } = await fixture(context, {
+    solarTodayProvider: async id => { entityId = id; return { energyKwh: 4.2, complete: true, source: 'cumulative-meter' }; },
+    dailyRecapProvider: async () => { throw new Error('Geen vermogenshistorie'); }
+  });
+  const response = await fetch(`${url}/api/mappings`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...emptyMappings, solarToday: 'sensor.solaredge_i1_ac_energy', solarTodayMode: 'total' }) });
+  assert.equal(response.status, 200);
+  assert.equal(store.get().mappings.solarTodayMode, 'total');
+  const bootstrap = await (await fetch(`${url}/api/bootstrap`)).json();
+  assert.equal(bootstrap.energy.solarOutlook.actualTodayKwh, null);
+  const recap = await (await fetch(`${url}/api/daily-recap`)).json();
+  assert.equal(recap.solarToday.energyKwh, 4.2);
+  assert.equal(entityId, 'sensor.solaredge_i1_ac_energy');
+});
+
 test('startup logs the underlying initialization error', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'gridnest-startup-test-'));
   const dataPath = join(directory, 'data');
@@ -306,14 +362,14 @@ test('meerdere personen worden opgeslagen, hersteld en gezamenlijk beoordeeld', 
   assert.equal(bootstrap.householdPresence.members.length, 2);
 });
 
-test('aanwezigheid aanpassen zet betrokken actieve Warmte terug naar proefmodus', async context => {
+test('aanwezigheid aanpassen behoudt de door de gebruiker gekozen actieve Warmte', async context => {
   const { url, store } = await fixture(context);
   const thermal = thermalSchema.parse(thermalConfig());
   thermal.mode = 'active'; thermal.rooms[0].presenceControl = true;
   await store.update({ thermal });
   const response = await fetch(`${url}/api/preferences`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...defaultPreferences, presenceEntities: ['person.demo_one'] }) });
   assert.equal(response.status, 200);
-  assert.equal(store.get().thermal.mode, 'preview');
+  assert.equal(store.get().thermal.mode, 'active');
   const invalid = await fetch(`${url}/api/preferences`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...defaultPreferences, presenceEntities: ['person.missing'] }) });
   assert.equal(invalid.status, 400);
   assert.deepEqual(store.get().preferences.presenceEntities, ['person.demo_one']);
@@ -476,6 +532,29 @@ test('laadpaalbediening bewaakt vrijgave, kabel, stroomlimiet en ontgrendelen', 
   assert.equal((await send({ action: 'current', value: 12, confirm: true })).status, 409);
   assert.equal(commands.length, 4);
   assert.deepEqual(commands[1], { entityId: 'number.demo_ev_current', service: 'number.set_value', value: 12 });
+});
+
+test('kabelvergrendeling via switch ondersteunt on/off en weigert ontgrendelen tijdens laden', async context => {
+  const commands = [];
+  let entities = demoEntities();
+  const { url, store } = await fixture(context, {
+    demo: false, supervisor: true, isIngressRequest: () => true,
+    entitiesProvider: async () => ({ connected: true, entities }),
+    runner: { status: () => ({ activeAllowed: true }) },
+    evCommandProvider: async command => commands.push(command)
+  });
+  await store.update({ mappings: { ...emptyMappings, evLockStatus: 'switch.thuis_laadkabel_vergrendeling', evPower: 'sensor.demo_ev_power' } });
+  const send = locked => fetch(`${url}/api/ev/control`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'lock', locked, confirm: true }) });
+  assert.equal((await send(false)).status, 409);
+  entities.find(item => item.id === 'sensor.demo_ev_power').state = '';
+  assert.equal((await send(false)).status, 409);
+  entities.find(item => item.id === 'sensor.demo_ev_power').state = '0';
+  assert.equal((await send(false)).status, 200);
+  assert.deepEqual(commands[0], { entityId: 'switch.thuis_laadkabel_vergrendeling', service: 'switch.turn_off' });
+  assert.equal((await send(true)).status, 200);
+  assert.equal(commands[1].service, 'switch.turn_on');
+  entities.find(item => item.id === 'switch.thuis_laadkabel_vergrendeling').state = 'unknown';
+  assert.equal((await send(true)).status, 409);
 });
 
 test('omvormerslider vereist actieve vrijgave, bevestiging en geldige stap', async context => {

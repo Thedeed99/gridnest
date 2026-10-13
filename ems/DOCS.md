@@ -21,7 +21,7 @@ Onder **Koppelingen** vind je een zoekveld en keuzelijsten met bestaande entitei
 | Bekend verbruik | Optionele totaalsensor voor de bekende apparaten in W of kW |
 | Batterijvermogen | Getekende `sensor` aan de woningzijde van de batterij, in W of kW |
 | Zonnepanelen | `sensor`, actueel productievermogen in W of kW |
-| Zonneopbrengst vandaag | Optionele `sensor`, daadwerkelijk opgewekte energie sinds middernacht in Wh of kWh; geen levensduurtotaal |
+| Zonneopbrengst vandaag | Optionele `sensor` in Wh/kWh: een dagmeter of een cumulatieve totaalmeter met de juiste bronkeuze |
 | Kamertemperatuur | `sensor`, temperatuur in graden Celsius |
 | Verwarming | `climate` |
 | Laadpaal | `sensor`, actueel laadvermogen in W of kW |
@@ -67,6 +67,8 @@ Laadpaal en Accu bevatten geen aparte Vandaag-sectie meer; de gezamenlijke dagre
 
 Bij Zonnepanelen staat de actuele dagopbrengst naast de verwachte dagopbrengst. Een gekoppelde **Zonneopbrengst vandaag** heeft voorrang; Wh wordt omgerekend naar kWh. Zonder die koppeling wordt het dagtotaal uit de vermogenshistorie geschat en blijft onvolledige historie gemarkeerd. Een gekoppelde maar ongeldige dagmeter wordt niet stil vervangen door een schatting. De uurgrafiek gebruikt vermogenshistorie en kan daardoor afwijken van de aparte dagmeter. De productielimietslider wordt bij loslaten toegepast na toestemming voor de huidige browsersessie en gekoppelde entiteit. Na herladen of een mislukte opdracht is opnieuw toestemming nodig. Vrijgave, Actief en recente geldige telemetrie blijven verplicht.
 
+Voor een allertijdenmeter zoals `sensor.solaredge_i1_ac_energy`: kies onder **Koppelingen** bij **Bron zonneopbrengst vandaag** de optie **Cumulatieve totaalmeter** en koppel die sensor aan **Zonneopbrengst vandaag**. Gridnest leest alleen Home Assistant en berekent het verschil tussen de stand bij middernacht in de Home Assistant-tijdzone en de actuele stand. De meter moet Wh/kWh en state_class total of total_increasing gebruiken. Zonder bewaarde beginstand, bij ongeldige standen of een tellerreset blijft het dagtotaal Niet beschikbaar; het levensduurtotaal wordt nooit als vandaag getoond. De uurgrafiek blijft afhankelijk van vermogenshistorie.
+
 ## Mijn wensen
 
 Onder **Metingen verversen** kies je 5, 10, 30 of 60 seconden, of alleen handmatig. De standaard is 10 seconden. Sla de wensen op om het interval te bewaren. De vernieuwknop blijft beschikbaar; het gekozen interval geldt voor het ophalen van metingen, niet voor de regelcyclus. Automatisch verversen wacht bij een verborgen pagina, open dialoog of actieve slider.
@@ -83,7 +85,7 @@ Schakel per kamer **Afwezigtemperatuur toepassen bij afwezigheid** in om aanwezi
 
 De Aanwezig/Afwezig-badge op een kamer verschijnt uitsluitend als die kamer een eigen aanwezigheidssensor heeft en de status bekend is. Huishoudelijke aanwezigheid wordt niet als gemeten kameraanwezigheid getoond; de optionele regeling kan die huishoudelijke aanwezigheid wel blijven gebruiken.
 
-Voor sturing moeten de aanwezigheidssignalen recent zijn volgens de ingestelde maximale meetouderdom. Bij onzekere of te oude aanwezigheid wordt de betrokken bronregeling geblokkeerd, niet automatisch verlaagd. De overzichtsbadge toont de laatst bekende beschikbare status; de controle voor sturing is strenger. Wijzigingen van personen, any/all-keuze of afwezigtemperatuur zetten betrokken actieve Warmte terug naar proefmodus. De thermostaat behoudt zijn laatst ingestelde doel totdat een volgende toegestane opdracht volgt.
+Voor sturing moeten de aanwezigheidssignalen recent zijn volgens de ingestelde maximale meetouderdom. Bij onzekere of te oude aanwezigheid wordt de betrokken bronregeling geblokkeerd, niet automatisch verlaagd. De overzichtsbadge toont de laatst bekende beschikbare status; de controle voor sturing is strenger. Wijzigingen van personen, any/all-keuze of afwezigtemperatuur behouden de gekozen modus. De thermostaat behoudt zijn laatst ingestelde doel totdat een volgende toegestane opdracht volgt.
 
 Onder **Verwarmingsprofiel** kun je vloerverwarming, airco/lucht-luchtwarmtepomp of radiatoren/convectoren kiezen. Het profiel geeft algemeen advies; er worden geen temperaturen of schakelcommando's automatisch toegepast. Een zware vloer is vaak gebaat bij een stabiele temperatuur en beperkte verlaging. Een airco kan de bediende ruimte vaak snel verwarmen. Installatie, isolatie en buitentemperatuur bepalen of dit advies past.
 
@@ -105,7 +107,7 @@ Kamers en bronnen zijn via het potlood te bewerken. Verwijderen vereist bevestig
 
 Warmte kan nu zelf thermostaatdoelen en verwarmmodus aansturen. Kies bij een bron een gekoppelde regelkamer, zet bronregeling aan en bevestig de thermostaatbediening. Het kamerdoel wordt dan de doeltemperatuur van die bron. Het temperatuurdoel wordt eerst geschreven; verwarmmodus volgt pas na terugmelding. De eigen thermostaat regelt vervolgens de warmteafgifte. Gridnest schakelt de netvoeding niet uit.
 
-Warmte heeft een eigen stand Uit, Proefmodus of Actief, onafhankelijk van Stroom. Gebruik eerst proefmodus; actief vereist dezelfde appvrijgave en expliciete bevestiging als Stroom. Een herstart zet actieve Warmte terug naar proefmodus. De pauzeknop in Warmte stopt nieuwe warmteopdrachten, niet de stroomregels. Dubbele thermostaatbediening vanuit Warmte en een bestaande stroomregel wordt geblokkeerd.
+Warmte heeft een eigen stand Uit, Proefmodus of Actief, onafhankelijk van Stroom. Gebruik eerst proefmodus; een nieuwe activering vereist dezelfde appvrijgave en expliciete bevestiging als Stroom. De gekozen stand blijft behouden bij opslaan en herstarten. De pauzeknop in Warmte stopt nieuwe warmteopdrachten, niet de stroomregels. Dubbele thermostaatbediening vanuit Warmte en een bestaande stroomregel wordt geblokkeerd.
 
 Een gedeelde centrale thermostaat maakt kamers niet onafhankelijk regelbaar: daarvoor zijn geschikte zoneregeling of radiatorregelaars nodig. Per bron is daarom een regelkamer leidend; andere kamers worden gemonitord. Meerdere ingeschakelde bronnen op dezelfde kamer krijgen hetzelfde doel, zonder automatische keuze van de goedkoopste bron. Een airco heeft alleen invloed op de ruimtes die deze fysiek kan verwarmen.
 
@@ -165,7 +167,7 @@ Voor verwarming kun je bijvoorbeeld een kamer- of aanwezigheidssensor gebruiken 
 5. Selecteer **Actief**, sla op en bevestig de activering in Gridnest. In demo of een losse container is actieve sturing geblokkeerd.
 6. Bewaak de eerste echte opdrachten in een pilot. **Alle regels pauzeren** zet de regelaar uit; dit stopt nieuwe opdrachten, maar herstelt geen eerdere apparaatwaarden en kan een reeds verzonden opdracht niet terughalen.
 
-Regels wijzigen, aan/uitzetten of verwijderen zet de regelaar terug naar proefmodus. Na een appherstart wordt actieve sturing eveneens proefmodus: je moet opnieuw expliciet activeren. Er zijn nog geen live installatie- of apparaattests uitgevoerd in deze ontwikkelomgeving.
+Regels wijzigen, aan/uitzetten of verwijderen behoudt de gekozen modus. Na een appherstart blijft Actief behouden en kan de regeling automatisch hervatten zodra apparaatvrijgave en geldige meetgegevens beschikbaar zijn. Kies zelf Uit of Proefmodus wanneer hervatten niet gewenst is. Deze wijziging is niet met fysieke apparaten getest.
 
 ## Uitvoering en grenzen
 
@@ -173,7 +175,7 @@ De uitvoerlaag verstuurt alleen opgeslagen, gevalideerde acties via de server. E
 
 Onder **Grenzen en timing** staan maximale meetouderdom, minimale tijd tussen opdrachten, de pauzeduur na een handmatige wijziging en batterij-SoC-grenzen. De minimale opdrachttijd is niet automatisch een fabrikantprofiel; kies deze conservatief en houd rekening met minimumdraaitijden. Constante sensoren zonder recente `last_reported` kunnen worden geblokkeerd, ook als Home Assistant ze nog toont.
 
-Na verzending wacht Gridnest op de gerapporteerde bedieningswaarde. Een onzekere transportuitkomst of ontbrekende bevestiging wordt niet automatisch opnieuw geprobeerd. De regel wordt gepauzeerd totdat je de regelaar uitzet, het apparaat controleert en opnieuw activeert. Een handmatige of externe waardeaanpassing veroorzaakt een tijdelijke pauze. Pauzegegevens worden niet over een appherstart bewaard; de herstart valt daarom altijd terug naar proefmodus.
+Na verzending wacht Gridnest op de gerapporteerde bedieningswaarde. Een onzekere transportuitkomst of ontbrekende bevestiging wordt binnen dezelfde serversessie niet automatisch opnieuw geprobeerd. De regel wordt gepauzeerd totdat je de regelaar uitzet, het apparaat controleert en opnieuw activeert. Een handmatige of externe waardeaanpassing veroorzaakt een tijdelijke pauze. Pauzegegevens worden niet over een appherstart bewaard, terwijl de gekozen modus wel behouden blijft. Zet bij een onzekere opdracht daarom zelf de modus Uit voordat je herstart.
 
 De actuele regelbeoordeling is geen duurzaam auditlog. Gridnest bewaakt nog geen fasebelasting, gas-/stroomkosten, fabrikant-specifieke veiligheid of interacties tussen onafhankelijke regels op verschillende apparaten. Laat alle fysieke en fabrieksbeveiligingen ingeschakeld.
 

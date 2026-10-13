@@ -12,12 +12,14 @@ import { createRuleRunner } from './rule-runner.js';
 import { demoUtilityHistory, readUtilityHistory } from './gas.js';
 import { dailyEnergyRecap, demoDailyRecap, recapMeters, readDailyRecap } from './daily-recap.js';
 import { readOfficialEnergy } from './energy-statistics.js';
+import { cumulativeSolarToday, readSolarMeterToday } from './solar-meter.js';
 
 export function createApp({ store, entitiesProvider, demo = false, supervisor = false, runner = null,
   isIngressRequest = request => request.socket.remoteAddress === '172.30.32.2' || request.socket.remoteAddress === '::ffff:172.30.32.2',
   utilityHistoryProvider = async () => ({ available: false, series: { hours24: [], days7: [], days30: [] } }),
   dailyRecapProvider = async () => ({ available: false, complete: false, rows: [] }),
   officialRecapProvider = async () => null,
+  solarTodayProvider = async () => null,
   batterySwitchProvider = async () => { throw new Error('Accubediening niet beschikbaar.'); },
   consumerSwitchProvider = async () => { throw new Error('Verbruikerbediening niet beschikbaar.'); },
   evCommandProvider = async () => { throw new Error('Laadpaalbediening niet beschikbaar.'); },
@@ -71,12 +73,14 @@ export function createApp({ store, entitiesProvider, demo = false, supervisor = 
   app.get('/api/daily-recap', async (_request, response) => {
     try {
       const config = store.get();
-      const [history, official] = await Promise.allSettled([dailyRecapProvider(config.mappings), officialRecapProvider(config.mappings)]);
+      const cumulative = config.mappings.solarToday && config.mappings.solarTodayMode === 'total';
+      const [history, official, solar] = await Promise.allSettled([dailyRecapProvider(config.mappings), officialRecapProvider(config.mappings), cumulative ? solarTodayProvider(config.mappings.solarToday) : Promise.resolve(null)]);
       const statistics = official.status === 'fulfilled' ? official.value : null;
-      if (history.status === 'rejected' && !statistics) throw history.reason;
+      const solarToday = cumulative ? solar.status === 'fulfilled' && solar.value ? solar.value : { energyKwh: null, complete: false, source: 'cumulative-meter', error: 'Zonne-totaalmeterhistorie niet beschikbaar.' } : null;
+      if (history.status === 'rejected' && !statistics && solarToday?.energyKwh == null) throw history.reason;
       const recap = history.status === 'fulfilled' ? history.value : { available: false, complete: false, rows: [] };
       response.setHeader('Cache-Control', 'no-store');
-      return response.json(statistics ? { ...recap, officialRows: statistics.rows, source: 'home-assistant', updatedThrough: statistics.updatedThrough } : recap);
+      return response.json({ ...(statistics ? { ...recap, officialRows: statistics.rows, source: 'home-assistant', updatedThrough: statistics.updatedThrough } : recap), ...(cumulative ? { solarToday } : {}) });
     } catch (error) {
       return response.status(503).json({ error: error.message || 'Dagrecap niet beschikbaar.' });
     }
@@ -176,9 +180,9 @@ export function createApp({ store, entitiesProvider, demo = false, supervisor = 
         }
         command = { entityId, service: `switch.turn_${body.data.enabled ? 'on' : 'off'}` };
       } else {
-        if (!['lock', 'switch'].includes(actuator.domain)) return response.status(409).json({ error: 'Ongeldige kabelvergrendeling.' });
+        if (!['lock', 'switch'].includes(actuator.domain) || !(actuator.domain === 'switch' ? ['on', 'off'] : ['locked', 'unlocked']).includes(actuator.state)) return response.status(409).json({ error: 'Ongeldige kabelvergrendeling.' });
         const power = connection.entities.find(entity => entity.id === snapshot.mappings.evPower);
-        if (!body.data.locked && (!isFresh(power, Date.now(), snapshot.control.maxAgeSeconds) || !['W', 'kW'].includes(power.unit) || !Number.isFinite(Number(power.state)) || Number(power.state) !== 0)) return response.status(409).json({ error: 'Stop eerst het laden; ontgrendelen vereist recent gemeten nulvermogen.' });
+        if (!body.data.locked && (!isFresh(power, Date.now(), snapshot.control.maxAgeSeconds) || !['W', 'kW'].includes(power.unit) || power.state.trim() === '' || !Number.isFinite(Number(power.state)) || Number(power.state) !== 0)) return response.status(409).json({ error: 'Stop eerst het laden; ontgrendelen vereist recent gemeten nulvermogen.' });
         const service = actuator.domain === 'switch' ? `switch.turn_${body.data.locked ? 'on' : 'off'}` : `lock.${body.data.locked ? 'lock' : 'unlock'}`;
         command = { entityId, service };
       }
@@ -226,10 +230,7 @@ export function createApp({ store, entitiesProvider, demo = false, supervisor = 
     const connection = await entitiesProvider();
     try { validatePresencePreferences(preferences, connection.entities); }
     catch (error) { return response.status(400).json({ error: error.message }); }
-    const previous = store.get();
-    const changed = ['presenceEntities', 'presenceMode', 'awayC'].some(key => JSON.stringify(preferences[key]) !== JSON.stringify(previous.preferences[key]));
-    const thermal = changed && previous.thermal.mode === 'active' && previous.thermal.rooms.some(room => room.presenceControl) ? { ...previous.thermal, mode: 'preview' } : previous.thermal;
-    await store.update({ preferences, thermal });
+    await store.update({ preferences });
     await runner?.tick();
     response.json({ preferences });
   });
@@ -241,7 +242,7 @@ export function createApp({ store, entitiesProvider, demo = false, supervisor = 
     } catch (error) {
       return response.status(400).json({ error: error instanceof ZodError ? error.issues[0].message : error.message });
     }
-    if (thermal.mode === 'active' && (demo || !supervisor || !runner?.status().activeAllowed || request.get('X-Gridnest-Confirm-Control') !== 'true')) return response.status(403).json({ error: 'Actieve Warmte vereist appvrijgave en expliciete bevestiging.' });
+    if (thermal.mode === 'active' && (demo || !supervisor || !runner?.status().activeAllowed || (store.get().thermal.mode !== 'active' && request.get('X-Gridnest-Confirm-Control') !== 'true'))) return response.status(403).json({ error: 'Actieve Warmte vereist appvrijgave en expliciete bevestiging.' });
     await store.update({ thermal });
     await runner?.tick();
     response.json({ thermal, controlStatus: runner?.status() });
@@ -261,7 +262,7 @@ export function createApp({ store, entitiesProvider, demo = false, supervisor = 
     } catch (error) {
       return response.status(400).json({ error: error instanceof ZodError ? error.issues[0].message : error.message });
     }
-    if (control.mode === 'active' && (demo || !supervisor || !runner?.status().activeAllowed || !body.confirmActive)) {
+    if (control.mode === 'active' && (demo || !supervisor || !runner?.status().activeAllowed || (store.get().control.mode !== 'active' && !body.confirmActive))) {
       return response.status(403).json({ error: 'Actieve sturing vereist vrijgave in de Home Assistant-app en expliciete bevestiging.' });
     }
     await store.update({ control });
@@ -305,8 +306,6 @@ export async function startServer(env = process.env) {
   const supervisor = Boolean(env.SUPERVISOR_TOKEN);
   const controlEnv = { ...env, CONTROL_ENABLED: supervisor && env.CONTROL_ENABLED === 'true' ? 'true' : 'false' };
   const store = await createStore(env.DATA_DIR || fileURLToPath(new URL('../data/', import.meta.url)), demo ? 'demo' : 'home-assistant');
-  if (store.get().control.mode === 'active') await store.update({ control: { ...store.get().control, mode: 'preview' } });
-  if (store.get().thermal.mode === 'active') await store.update({ thermal: { ...store.get().thermal, mode: 'preview' } });
   const entitiesProvider = demo ? async () => ({ connected: false, entities: demoEntities(), message: 'Voorbeeldwoning · geen echte verbinding' }) : () => readEntities(env);
   const utilityHistoryProvider = demo ? async (_entityId, utility) => demoUtilityHistory(utility) : entityId => readUtilityHistory(env, entityId);
   const dailyRecapProvider = demo
@@ -314,6 +313,13 @@ export async function startServer(env = process.env) {
     : async mappings => readDailyRecap(env, recapMeters(mappings, (await entitiesProvider()).entities));
   const batterySwitchProvider = (entityId, enabled) => executeRuleCommand({ entityId, service: `switch.turn_${enabled ? 'on' : 'off'}` }, controlEnv);
   const officialRecapProvider = demo ? async () => null : mappings => readOfficialEnergy(env, mappings);
+  const solarTodayProvider = async entityId => {
+    const now = new Date();
+    const entity = (await entitiesProvider()).entities.find(item => item.id === entityId);
+    if (!entity) return { energyKwh: null, complete: false };
+    if (!demo) return readSolarMeterToday(env, entity, fetch, now);
+    return cumulativeSolarToday([[{ state: String(Number(entity.state) - (entity.unit === 'Wh' ? 7120 : 7.12)), last_updated: new Date(now.getTime() - 30 * 3600000).toISOString() }]], entity, now);
+  };
   const consumerSwitchProvider = (entityId, enabled) => executeRuleCommand({ entityId, service: `switch.turn_${enabled ? 'on' : 'off'}` }, controlEnv);
   const solarLimitProvider = (entityId, value) => executeRuleCommand({ entityId, service: 'number.set_value', value }, controlEnv);
   const evCommandProvider = command => executeRuleCommand(command, controlEnv);
@@ -321,7 +327,7 @@ export async function startServer(env = process.env) {
     unitProvider: demo ? async () => '°C' : () => readTemperatureUnit(env),
     activeAllowed: supervisor && controlEnv.CONTROL_ENABLED === 'true' && !demo,
     execute: command => executeRuleCommand(command, controlEnv) });
-  const app = createApp({ store, demo, supervisor, entitiesProvider, runner, utilityHistoryProvider, dailyRecapProvider, officialRecapProvider, batterySwitchProvider, solarLimitProvider, evCommandProvider, consumerSwitchProvider });
+  const app = createApp({ store, demo, supervisor, entitiesProvider, runner, utilityHistoryProvider, dailyRecapProvider, officialRecapProvider, solarTodayProvider, batterySwitchProvider, solarLimitProvider, evCommandProvider, consumerSwitchProvider });
   const server = app.listen(8080, env.HOST || (supervisor ? '0.0.0.0' : '127.0.0.1'), () => {
     runner.start();
     const mode = demo ? 'demo' : runner.status().activeAllowed ? 'sturing toegestaan' : 'regels standaard uit';
