@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.7 - 2026-10-13
+
+- Toon bij het openen van Zonnepanelen direct de laatst bekende dagopbrengst en laad ondertussen verse dagrecapdata op de achtergrond.
+
 ## 1.0.6 - 2026-10-13
 
 - Sta een maximale meetouderdom van 24 uur toe; de standaard blijft 15 minuten.
