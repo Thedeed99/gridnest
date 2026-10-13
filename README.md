@@ -30,7 +30,7 @@ De startpagina met fictieve demo-entiteiten en meetwaarden, zonder persoonlijke 
 
 De GitHub-workflow test en bouwt de interface en controleert containers voor amd64 en aarch64. Alleen een expliciete `v*`-versietag publiceert een multi-architectuurimage naar GHCR, na tests en container-smoke-tests. De tag moet overeenkomen met de pakketversie.
 
-De publieke bronrepository staat op [github.com/Thedeed99/gridnest](https://github.com/Thedeed99/gridnest). Voeg deze URL in Home Assistant toe via **Instellingen > Add-ons > Add-on Store > menu > Repositories**. Omdat `ems/config.yaml` geen `image` opgeeft, bouwt Home Assistant de add-on vanuit de bronrepository. Er is nog geen versie-image gepubliceerd.
+De publieke bronrepository staat op [github.com/Thedeed99/gridnest](https://github.com/Thedeed99/gridnest). Voeg deze URL in Home Assistant toe via **Instellingen > Add-ons > Add-on Store > menu > Repositories**. Omdat `ems/config.yaml` geen `image` opgeeft, bouwt Home Assistant de add-on vanuit de bronrepository. Expliciete `v*`-releasetags publiceren daarnaast een multi-architectuurimage naar GHCR.
 
 ## Lokaal ontwikkelen
 
