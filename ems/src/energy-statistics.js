@@ -69,7 +69,7 @@ export function officialEnergyRows(groups, statistics, metadata = []) {
   return rows;
 }
 
-export async function readOfficialEnergy(env, mappings = {}, now = new Date(), Socket = WebSocket) {
+export async function readStatisticsConnection(env, load, Socket = WebSocket) {
   const supervisor = Boolean(env.SUPERVISOR_TOKEN);
   const token = supervisor ? env.SUPERVISOR_TOKEN : env.HA_TOKEN;
   const base = supervisor ? 'http://supervisor/core' : env.HA_URL;
@@ -102,23 +102,6 @@ export async function readOfficialEnergy(env, mappings = {}, now = new Date(), S
       try { socket.send(JSON.stringify({ ...command, id })); }
       catch { pending.delete(id); rejectCall(new Error('Statistiekverzoek versturen mislukt.')); }
     });
-    const load = async () => {
-      const preferences = await call({ type: 'energy/get_prefs' });
-      if (!Array.isArray(preferences?.energy_sources)) throw new Error('Home Assistant Energie is niet ingesteld.');
-      const config = await call({ type: 'get_config' });
-      const range = energyDayRange(now, config.time_zone);
-      const groups = energyStatisticGroups(preferences, mappings);
-      const ids = [...new Set(Object.values(groups).flat())];
-      if (!ids.length) throw new Error('Geen energietellers ingesteld in Home Assistant Energie.');
-      const metadata = await call({ type: 'recorder/get_statistics_metadata', statistic_ids: ids });
-      if (!Array.isArray(metadata)) throw new Error('Ongeldige energiestatistiekmetadata.');
-      const statistics = await call({ type: 'recorder/statistics_during_period', start_time: range.start, end_time: range.end,
-        statistic_ids: ids, period: 'hour', units: { energy: 'kWh', volume: 'm³' }, types: ['change'] });
-      if (!statistics || typeof statistics !== 'object' || Array.isArray(statistics)) throw new Error('Ongeldige energiestatistieken.');
-      const ends = Object.values(statistics).flat().map(item => item.end).filter(value => typeof value === 'number' && Number.isFinite(value));
-      return { rows: officialEnergyRows(groups, statistics, metadata), source: 'home-assistant', periodStart: range.start,
-        updatedThrough: ends.length ? new Date(Math.max(...ends)).toISOString() : null };
-    };
     socket.addEventListener('message', event => {
       if (finished) return;
       let message;
@@ -130,7 +113,7 @@ export async function readOfficialEnergy(env, mappings = {}, now = new Date(), S
       } else if (message.type === 'auth_invalid') finish(new Error('Toegang tot Home Assistant-energiestatistieken geweigerd.'));
       else if (message.type === 'auth_ok' && !authenticated) {
         authenticated = true;
-        load().then(result => finish(null, result), error => finish(error));
+        load(call).then(result => finish(null, result), error => finish(error));
       } else if (message.type === 'result') {
         const request = pending.get(message.id);
         if (!request) return;
@@ -142,4 +125,24 @@ export async function readOfficialEnergy(env, mappings = {}, now = new Date(), S
     socket.addEventListener('error', () => finish(new Error('Verbinding met Home Assistant-energiestatistieken mislukt.')));
     socket.addEventListener('close', () => finish(new Error('Verbinding met Home Assistant-energiestatistieken gesloten.')));
   });
+}
+
+export async function readOfficialEnergy(env, mappings = {}, now = new Date(), Socket = WebSocket) {
+  return readStatisticsConnection(env, async call => {
+    const preferences = await call({ type: 'energy/get_prefs' });
+    if (!Array.isArray(preferences?.energy_sources)) throw new Error('Home Assistant Energie is niet ingesteld.');
+    const config = await call({ type: 'get_config' });
+    const range = energyDayRange(now, config.time_zone);
+    const groups = energyStatisticGroups(preferences, mappings);
+    const ids = [...new Set(Object.values(groups).flat())];
+    if (!ids.length) throw new Error('Geen energietellers ingesteld in Home Assistant Energie.');
+    const metadata = await call({ type: 'recorder/get_statistics_metadata', statistic_ids: ids });
+    if (!Array.isArray(metadata)) throw new Error('Ongeldige energiestatistiekmetadata.');
+    const statistics = await call({ type: 'recorder/statistics_during_period', start_time: range.start, end_time: range.end,
+      statistic_ids: ids, period: 'hour', units: { energy: 'kWh', volume: 'm³' }, types: ['change'] });
+    if (!statistics || typeof statistics !== 'object' || Array.isArray(statistics)) throw new Error('Ongeldige energiestatistieken.');
+    const ends = Object.values(statistics).flat().map(item => item.end).filter(value => typeof value === 'number' && Number.isFinite(value));
+    return { rows: officialEnergyRows(groups, statistics, metadata), source: 'home-assistant', periodStart: range.start,
+      updatedThrough: ends.length ? new Date(Math.max(...ends)).toISOString() : null };
+  }, Socket);
 }

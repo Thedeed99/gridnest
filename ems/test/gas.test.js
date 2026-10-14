@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { demoUtilityHistory, readUtilityHistory, utilityConsumptionSeries, utilityPeriodTotals } from '../src/gas.js';
+import { demoUtilityHistory, readUtilityHistory, readUtilityStatistics, utilityConsumptionSeries, utilityPeriodTotals } from '../src/gas.js';
 
 test('gasstandverschillen worden naar 24 uur, 7 dagen en 30 dagen geaggregeerd', () => {
   const now = new Date('2026-10-12T12:00:00.000Z');
@@ -64,10 +64,92 @@ test('metergeschiedenis gebruikt uitsluitend de geselecteerde entiteit via HA hi
   const result = await readUtilityHistory({ SUPERVISOR_TOKEN: 'test-token' }, 'sensor.gas_total', async (url, options) => {
     requested = { url: new URL(url), options };
     return { ok: true, json: async () => [[]] };
-  }, now);
+  }, now, async () => { throw new Error('Geen statistieken.'); });
   assert.equal(requested.url.pathname.includes('/history/period/'), true);
   assert.equal(requested.url.searchParams.get('filter_entity_id'), 'sensor.gas_total');
   assert.equal(requested.url.searchParams.has('minimal_response'), true);
   assert.equal(requested.options.headers.Authorization, 'Bearer test-token');
   assert.equal(result.available, false);
+});
+
+test('gas en water vullen oudere dagen aan zonder recente historie dubbel te tellen', async () => {
+  const now = new Date('2026-10-14T12:00:00Z');
+  for (const utility of ['gas', 'water']) {
+    const entityId = `sensor.${utility}_total`;
+    const statisticHistory = Array.from({ length: 722 }, (_, index) => ({
+      last_changed: new Date(now.getTime() - (721 - index) * 3600000).toISOString(), state: String(index)
+    }));
+    const statistical = utilityConsumptionSeries([statisticHistory], now);
+    const history = statisticHistory.slice(-25);
+    const result = await readUtilityHistory({ SUPERVISOR_TOKEN: 'test-token' }, entityId,
+      async () => ({ ok: true, json: async () => [history] }), now,
+      async (_env, requestedId) => { assert.equal(requestedId, entityId); return statistical; });
+    assert.equal(result.series.days30.length, 30);
+    assert.ok(result.series.days30.every(bucket => bucket.value === 24));
+    assert.equal(result.totals.days30.value, 720);
+    assert.equal(result.totals.hours24.value, 24);
+  }
+});
+
+test('meterhistorie blijft beschikbaar bij statistiekuitval en statistieken bij historieuitval', async () => {
+  const now = new Date('2026-10-14T12:00:00Z');
+  const history = [{ last_changed: '2026-10-14T10:00:00Z', state: '100' },
+    { last_changed: '2026-10-14T11:00:00Z', state: '101' }];
+  const expected = utilityConsumptionSeries([history], now);
+  const fallback = await readUtilityHistory({ SUPERVISOR_TOKEN: 'test-token' }, 'sensor.water',
+    async () => ({ ok: true, json: async () => [history] }), now,
+    async () => { throw new Error('Statistieken uitgevallen.'); });
+  assert.deepEqual(fallback, expected);
+  const statisticsOnly = await readUtilityHistory({ SUPERVISOR_TOKEN: 'test-token' }, 'sensor.water',
+    async () => { throw new Error('Historie uitgevallen.'); }, now, async () => expected);
+  assert.deepEqual(statisticsOnly, expected);
+  await assert.rejects(readUtilityHistory({ SUPERVISOR_TOKEN: 'test-token' }, 'sensor.water',
+    async () => { throw new Error('Historie uitgevallen.'); }, now,
+    async () => utilityConsumptionSeries([], now)), /Historie uitgevallen/);
+});
+
+test('gas- en waterstatistieken gebruiken alleen de gekoppelde volumemeter en m3-conversie', async () => {
+  const now = new Date('2026-10-14T12:00:00Z');
+  for (const [entityId, unit] of [['sensor.gas', 'm³'], ['sensor.water', 'L']]) {
+    const commands = [];
+    let closed = false;
+    class FakeSocket extends EventTarget {
+      constructor(url) {
+        super();
+        assert.equal(url, 'ws://supervisor/core/websocket');
+        queueMicrotask(() => this.message({ type: 'auth_required' }));
+      }
+      message(data) { this.dispatchEvent(new MessageEvent('message', { data: JSON.stringify(data) })); }
+      send(payload) {
+        const command = JSON.parse(payload);
+        commands.push(command);
+        if (command.type === 'auth') {
+          queueMicrotask(() => this.message({ type: 'auth_ok' }));
+          return;
+        }
+        assert.deepEqual(command.statistic_ids, [entityId]);
+        const result = command.type === 'recorder/get_statistics_metadata'
+          ? [{ statistic_id: entityId, has_sum: true, statistics_unit_of_measurement: unit }]
+          : { [entityId]: [
+            { start: now.getTime() - 20 * 86400000, end: now.getTime() - 20 * 86400000 + 3600000, change: 0.5 },
+            { start: now.getTime() - 3600000, end: now.getTime(), change: 0 },
+            { start: now.getTime() - 3600000, end: now.getTime(), change: -1 },
+            { start: now.getTime(), end: now.getTime() + 3600000, change: 50 }
+          ] };
+        queueMicrotask(() => this.message({ type: 'result', id: command.id, success: true, result }));
+      }
+      close() { closed = true; }
+    }
+    const result = await readUtilityStatistics({ SUPERVISOR_TOKEN: 'test-token' }, entityId, now, FakeSocket);
+    assert.equal(result.available, true);
+    assert.equal(result.totals.days30.value, 0.5);
+    assert.equal(result.series.days30.at(-1).value, 0);
+    assert.equal(closed, true);
+    assert.deepEqual(commands.map(command => command.type), ['auth', 'recorder/get_statistics_metadata', 'recorder/statistics_during_period']);
+    assert.deepEqual(commands.at(-1).units, { volume: 'm³' });
+    assert.equal(commands.at(-1).period, 'hour');
+    assert.deepEqual(commands.at(-1).types, ['change']);
+    assert.equal(commands.at(-1).end_time, now.toISOString());
+    assert.ok(!JSON.stringify(result).includes('test-token'));
+  }
 });
