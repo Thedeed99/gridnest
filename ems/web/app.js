@@ -363,7 +363,10 @@ function overview() {
         node.classList.toggle('flow-active-from-home', power !== null && power > 0.01);
       });
     } else {
-      node.append(icon(name), element('span', '', title), liveText('strong', '', () => measurement(role || 'totalConsumption')));
+      node.append(icon(name), element('span', '', title));
+      if (role === 'climate' && data.mappings.temperature) {
+        node.append(liveText('strong', '', () => measurement('temperature')), liveText('small', '', () => measurement('climate')));
+      } else node.append(liveText('strong', '', () => measurement(role || 'totalConsumption')));
       if (!role) {
         node.append(liveText('small', '', () => measurement('presence')));
         const batteryBadge = liveText('small', 'battery-feeding-badge', () => {

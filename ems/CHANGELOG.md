@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.8 - 2026-10-14
+
+- Toon de gekoppelde kamertemperatuur onder Warmte in Energiestromen, met de verwarmingsmodus eronder.
+
 ## 1.0.7 - 2026-10-13
 
 - Toon bij het openen van Zonnepanelen direct de laatst bekende dagopbrengst en laad ondertussen verse dagrecapdata op de achtergrond.
