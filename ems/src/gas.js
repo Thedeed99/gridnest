@@ -1,3 +1,5 @@
+import { readStatisticsConnection } from './energy-statistics.js';
+
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 const HISTORY_DAYS = 30;
@@ -71,7 +73,54 @@ export function utilityConsumptionSeries(history, now = new Date()) {
   return { available: states.length > 1, series, totals: utilityPeriodTotals(series), today: utilityTodayTotal(states, now) };
 }
 
-export async function readUtilityHistory(env, entityId, request = fetch, now = new Date()) {
+export async function readUtilityStatistics(env, entityId, now = new Date(), Socket = WebSocket) {
+  return readStatisticsConnection(env, async call => {
+    const metadata = await call({ type: 'recorder/get_statistics_metadata', statistic_ids: [entityId] });
+    const info = Array.isArray(metadata) ? metadata.find(item => item.statistic_id === entityId) : null;
+    const unit = info?.statistics_unit_of_measurement ?? info?.unit_of_measurement;
+    if (!info?.has_sum || !(info.unit_class === 'volume' || ['m³', 'm3', 'L', 'gal', 'ft³'].includes(unit))) {
+      throw new Error('Geen volumestatistieken beschikbaar voor deze meter.');
+    }
+    const statistics = await call({ type: 'recorder/statistics_during_period',
+      start_time: new Date(now.getTime() - HISTORY_DAYS * DAY_MS - HOUR_MS).toISOString(), end_time: now.toISOString(),
+      statistic_ids: [entityId], period: 'hour', units: { volume: 'm³' }, types: ['change'] });
+    const points = statistics?.[entityId];
+    if (!Array.isArray(points)) throw new Error('Meterstatistieken niet beschikbaar.');
+    const series = { hours24: buckets(now, 24, HOUR_MS), days7: buckets(now, 7, DAY_MS), days30: buckets(now, 30, DAY_MS) };
+    for (const point of points) {
+      if (!Number.isFinite(point.start) || !Number.isFinite(point.end) || !Number.isFinite(point.change) || point.change < 0 || point.end <= point.start) continue;
+      const age = now.getTime() - point.end;
+      for (const [key, count, interval] of [['hours24', 24, HOUR_MS], ['days7', 7, DAY_MS], ['days30', 30, DAY_MS]]) {
+        if (age >= 0 && age < count * interval) addConsumption(series[key][count - 1 - Math.floor(age / interval)], point.change);
+      }
+    }
+    return { available: series.days30.some(bucket => bucket.value !== null), series, totals: utilityPeriodTotals(series), today: { value: null, complete: false } };
+  }, Socket);
+}
+
+export async function readUtilityHistory(env, entityId, request = fetch, now = new Date(), statisticsProvider = readUtilityStatistics) {
+  const [history, statistics] = await Promise.allSettled([
+    readUtilityRawHistory(env, entityId, request, now), statisticsProvider(env, entityId, now)
+  ]);
+  if (history.status === 'rejected') {
+    if (statistics.status === 'fulfilled' && statistics.value.available) return statistics.value;
+    throw history.reason;
+  }
+  const result = history.value;
+  if (statistics.status === 'fulfilled' && statistics.value.available) {
+    for (const key of ['hours24', 'days7', 'days30']) {
+      result.series[key] = result.series[key].map((bucket, index) => {
+        const statistical = statistics.value.series[key][index];
+        return bucket.value === null && statistical?.value !== null ? statistical : bucket;
+      });
+    }
+    result.available = true;
+    result.totals = utilityPeriodTotals(result.series);
+  }
+  return result;
+}
+
+async function readUtilityRawHistory(env, entityId, request, now) {
   const supervisor = Boolean(env.SUPERVISOR_TOKEN);
   const token = supervisor ? env.SUPERVISOR_TOKEN : env.HA_TOKEN;
   const base = supervisor ? 'http://supervisor/core/api' : env.HA_URL;

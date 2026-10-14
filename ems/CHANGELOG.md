@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.9 - 2026-10-14
+
+- Vul ontbrekende gas- en waterhistorie aan met Home Assistant-langetermijnstatistieken voor de grafieken over 30 dagen, zonder dubbele telling; behoud nulweergave bij ontbrekende data.
+
 ## 1.0.8 - 2026-10-14
 
 - Toon de gekoppelde kamertemperatuur onder Warmte in Energiestromen, met de verwarmingsmodus eronder.
