@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.10 - 2026-10-14
+
+- Houd het navigatiemenu zichtbaar tijdens scrollen op desktop; behoud het uitschuifmenu op mobiel.
+
 ## 1.0.9 - 2026-10-14
 
 - Vul ontbrekende gas- en waterhistorie aan met Home Assistant-langetermijnstatistieken voor de grafieken over 30 dagen, zonder dubbele telling; behoud nulweergave bij ontbrekende data.
