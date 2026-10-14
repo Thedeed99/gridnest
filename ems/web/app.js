@@ -757,6 +757,7 @@ async function loadDailyRecapData(container, reload, filter) {
     const hasMatchingCache = dailyRecapCache?.mappingsKey === JSON.stringify(data.mappings);
     if (solarActual && !hasMatchingCache) solarActual.textContent = solarDayText();
     if (document.body.contains(container)) {
+      container.querySelector('.daily-recap-loading')?.remove();
       if (container.querySelector('.daily-recap-list')) {
         let warning = container.querySelector('.daily-recap-refresh-error');
         if (!warning) {
@@ -777,6 +778,8 @@ async function loadDailyRecapData(container, reload, filter) {
 }
 
 function renderDailyRecapRows(container, rows, recap, showUpdatedThrough = true) {
+  container.querySelector('.daily-recap-loading')?.remove();
+  container.querySelector('.daily-recap-load-error')?.remove();
   container.querySelector('.daily-recap-refresh-error')?.remove();
   const signature = JSON.stringify({ rows, source: recap.source, updatedThrough: recap.updatedThrough, showUpdatedThrough });
   if (container.dataset.recapSignature === signature) return;
@@ -849,7 +852,7 @@ function dailyRecapPanel() {
   const content = element('div', 'daily-recap-content');
   const cache = dailyRecapCache?.mappingsKey === JSON.stringify(data.mappings) ? dailyRecapCache : null;
   if (cache?.overviewRows) renderDailyRecapRows(content, cache.overviewRows, cache);
-  else content.append(element('p', 'muted', 'Dagtotalen laden…'));
+  else content.append(element('p', 'muted daily-recap-loading', 'Dagtotalen laden…'));
   section.append(header, content);
   dailyRecapPanelNode = section;
   dailyRecapContentNode = content;
