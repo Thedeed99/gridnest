@@ -95,12 +95,14 @@ test('prijssensoren moeten de juiste euro-eenheid hebben', () => {
   ]), /EUR\/kWh/);
 });
 
-test('Home Assistant levert alleen statistieken van ingeschakelde gekoppelde meters', async () => {
+test('Home Assistant vraagt alleen statistieken op voor gekoppelde verbruiks- en teruglevermeters', async () => {
   const now = new Date('2026-10-15T12:00:00Z');
   const config = {
-    mappings: { electricityLow: 'sensor.low', electricityHigh: null, gasConsumption: 'sensor.gas', waterConsumption: null },
+    mappings: { electricityLow: 'sensor.low', electricityHigh: null, electricityReturnLow: 'sensor.return_low', electricityReturnHigh: null,
+      gasConsumption: 'sensor.gas', waterConsumption: null },
     preferences: { costs: {
       electricity: { enabled: true, rate: { source: 'manual', value: 0.2 } },
+      feedIn: { enabled: true, rate: { source: 'manual', value: 0.1 } },
       gas: { enabled: true, rate: { source: 'manual', value: 1.25 } },
       water: { enabled: false, rate: { source: 'manual', value: 1.5 } }
     } }
@@ -116,23 +118,23 @@ test('Home Assistant levert alleen statistieken van ingeschakelde gekoppelde met
       let result;
       if (command.type === 'get_config') result = { time_zone: 'Europe/Amsterdam' };
       if (command.type === 'recorder/get_statistics_metadata') result = command.statistic_ids.map(statistic_id => ({ statistic_id, has_sum: true,
-        unit_class: statistic_id === 'sensor.low' ? 'energy' : 'volume' }));
+        unit_class: ['sensor.low', 'sensor.return_low'].includes(statistic_id) ? 'energy' : 'volume' }));
       if (command.type === 'recorder/statistics_during_period') {
         requestedIds = command.statistic_ids;
         requestedStartTime = command.start_time;
-        result = Object.fromEntries(command.statistic_ids.map(id => [id, [{ start: now.getTime() - 3600000, end: now.getTime(), change: id === 'sensor.low' ? 2 : 0.5 }]]));
+        result = Object.fromEntries(command.statistic_ids.map(id => [id, [{ start: now.getTime() - 3600000, end: now.getTime(), change: id === 'sensor.low' ? 2 : id === 'sensor.return_low' ? 3 : 0.5 }]]));
       }
       queueMicrotask(() => this.message({ id: command.id, type: 'result', success: true, result }));
     }
     close() {}
   }
   const result = await readEnergyCosts({ SUPERVISOR_TOKEN: 'test-token' }, config, [], now, FakeSocket);
-  assert.deepEqual(requestedIds, ['sensor.low', 'sensor.gas']);
+  assert.deepEqual(requestedIds, ['sensor.low', 'sensor.return_low', 'sensor.gas']);
   assert.equal(requestedStartTime, '2026-09-30T22:00:00.000Z');
-  assert.deepEqual(result.resources.map(resource => [resource.key, resource.today]), [['electricity', 0.4], ['gas', 0.625]]);
+  assert.deepEqual(result.resources.map(resource => [resource.key, Number(resource.today.toFixed(3))]), [['electricity', 0.4], ['feedIn', 0.3], ['gas', 0.625]]);
 });
 
-test('zes decimalen blijven behouden en een totaalmeter voorkomt dubbele telling van laag/hoog', () => {
+test('zes decimalen blijven behouden en oude totaalmeter werkt als terugval', () => {
   const summary = summarizeEnergyCosts({
     costs: { ...costs, electricity: { enabled: true, rate: { source: 'manual', value: 0.234567 } },
       gas: { ...costs.gas, enabled: false }, water: { ...costs.water, enabled: false },
@@ -142,10 +144,25 @@ test('zes decimalen blijven behouden en een totaalmeter voorkomt dubbele telling
     entities: [], now: new Date('2026-10-15T12:00:00Z'), timeZone: 'Europe/Amsterdam'
   });
   assert.equal(summary.resources[0].today, 10 * 0.234567);
-  assert.equal(summary.resources[0].details.length, 1);
+  assert.equal(summary.resources[0].details.length, 2);
   assert.equal(summary.resources[1].today, 3 * 0.123456);
   assert.equal(summary.resources[1].month, 3 * 0.123456);
   assert.equal(summary.resources[1].status, null);
+});
+
+test('laag en hoog worden apart gekoppeld voor zowel verbruik als teruglevering', () => {
+  const summary = summarizeEnergyCosts({
+    costs: { ...costs, electricity: { enabled: true, rate: { source: 'manual', value: 0.2 } },
+      feedIn: { enabled: true, rate: { source: 'manual', value: 0.1 } }, gas: { ...costs.gas, enabled: false }, water: { ...costs.water, enabled: false } },
+    mappings: { electricityLow: 'sensor.import_low', electricityHigh: 'sensor.import_high',
+      electricityReturnLow: 'sensor.export_low', electricityReturnHigh: 'sensor.export_high' },
+    statistics: Object.fromEntries([['sensor.import_low', 2], ['sensor.import_high', 3], ['sensor.export_low', 4], ['sensor.export_high', 5]]
+      .map(([id, change]) => [id, [{ end: Date.parse('2026-10-15T11:00:00Z'), change }]])),
+    entities: [], now: new Date('2026-10-15T12:00:00Z'), timeZone: 'Europe/Amsterdam'
+  });
+  assert.deepEqual(summary.resources.map(resource => [resource.key, resource.today, resource.details.map(detail => detail.label)]), [
+    ['electricity', 1, ['Laag', 'Hoog']], ['feedIn', 0.9, ['Laag', 'Hoog']]
+  ]);
 });
 
 test('ontbrekende maandprijzen verbergen een bekende dagopbrengst niet', () => {

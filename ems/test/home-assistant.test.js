@@ -181,6 +181,7 @@ test('laag- en hoogtarief accepteren alleen verschillende cumulatieve kWh-meters
   const entities = normalizeStates([
     state('sensor.low_total', 'kWh', '124', { state_class: 'total_increasing' }),
     state('sensor.high_total', 'kWh', '85', { state_class: 'total' }),
+    state('sensor.return_total', 'kWh', '42', { state_class: 'total_increasing' }),
     state('sensor.session', 'kWh', '2.1', { state_class: 'measurement' })
   ]);
   const mappings = validateMappings({ ...emptyMappings, electricityLow: 'sensor.low_total', electricityHigh: 'sensor.high_total' }, entities);
@@ -191,4 +192,9 @@ test('laag- en hoogtarief accepteren alleen verschillende cumulatieve kWh-meters
   assert.equal(validateMappings({ ...emptyMappings, electricityConsumption: 'sensor.low_total', electricityReturn: 'sensor.high_total' }, entities).electricityReturn, 'sensor.high_total');
   assert.throws(() => validateMappings({ ...emptyMappings, electricityReturn: 'sensor.session' }, entities), /cumulatieve/);
   assert.throws(() => validateMappings({ ...emptyMappings, electricityConsumption: 'sensor.low_total', electricityReturn: 'sensor.low_total' }, entities), /afzonderlijke/);
+  const split = validateMappings({ ...emptyMappings, electricityLow: 'sensor.low_total', electricityHigh: 'sensor.high_total',
+    electricityReturnLow: 'sensor.return_total', electricityReturnHigh: null }, entities);
+  assert.equal(split.electricityReturnLow, 'sensor.return_total');
+  assert.throws(() => validateMappings({ ...emptyMappings, electricityReturnLow: 'sensor.session' }, entities), /cumulatieve/);
+  assert.throws(() => validateMappings({ ...emptyMappings, electricityLow: 'sensor.low_total', electricityReturnHigh: 'sensor.low_total' }, entities), /afzonderlijke/);
 });

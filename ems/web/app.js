@@ -2042,6 +2042,7 @@ function entities() {
     const groups = new Map();
     for (const role of data.roles) {
       if (role.id === 'presence') continue;
+      if (role.hidden) continue;
       if (['gridImport', 'gridExport'].includes(role.id) && mappingsDraft.gridMode === 'signed') continue;
       if (role.id === 'gridPower' && mappingsDraft.gridMode !== 'signed') continue;
       if (mappingsDraft.batteryMode === 'none' && role.id.startsWith('battery')) continue;
