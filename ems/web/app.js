@@ -2376,6 +2376,12 @@ function preferences() {
     gas: { enabled: false, rate: { source: 'manual', value: null, entityId: null } },
     water: { enabled: false, rate: { source: 'manual', value: null, entityId: null } }
   };
+  for (const key of ['electricity', 'feedIn']) {
+    const resource = preferencesDraft.costs[key];
+    resource.rateMode ??= 'single';
+    resource.lowRate ??= { source: 'manual', value: null, entityId: null };
+    resource.highRate ??= { source: 'manual', value: null, entityId: null };
+  }
   function costRateControl(parent, title, rate, unit) {
     const rateFields = element('div', 'cost-rate-fields');
     rateFields.append(element('strong', 'cost-rate-title', title));

@@ -1,11 +1,8 @@
 # Changelog
 
-## Nog niet uitgebracht
-
-- Kies voor stroomverbruik en teruglevering onafhankelijk tussen één tarief of aparte lage en hoge tarieven.
-
 ## 1.0.14 - 2026-10-15
 
+- Kies voor stroomverbruik en teruglevering onafhankelijk tussen één tarief of aparte lage en hoge tarieven.
 - Koppel laag- en hoogtariefmeters afzonderlijk voor stroomverbruik en teruglevering; behoud oude totaalmeterkoppelingen als verborgen terugval.
 - Hernoem Kosten naar Financieel met vandaag en deze maand, terugleveropbrengsten en saldo kosten.
 - Vereenvoudig stroom naar één all-in kWh-tarief en ondersteun handmatige prijzen tot zes decimalen.

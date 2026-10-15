@@ -144,8 +144,9 @@ export function summarizeEnergyCosts({ costs, mappings, entities, statistics, pr
       const month = total('monthCost');
       const hasRate = details.length > 0 && details.every(detail => detail.rate &&
         (detail.rate.source === 'manual' ? detail.rate.value !== null : Boolean(detail.rate.entityId)));
+      const missingSplitMeter = resource.rateMode === 'dual' && (details.length !== 2 || details.some(detail => !detail.rate));
       return { key: resource.key, label: resource.label, unit: resource.unit, today, month,
-        status: !details.length ? `Koppel een ${resource.unit}-meter onder Koppelingen` : !hasRate ? 'Vul het tarief in bij Mijn wensen' : today === null || month === null ? 'Tariefhistorie of meterstatistieken ontbreken' : null,
+        status: !details.length ? `Koppel een ${resource.unit}-meter onder Koppelingen` : missingSplitMeter ? 'Koppel de lage en hoge meter onder Koppelingen' : !hasRate ? 'Vul het tarief in bij Mijn wensen' : today === null || month === null ? 'Tariefhistorie of meterstatistieken ontbreken' : null,
         details };
     })
   };
