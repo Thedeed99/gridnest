@@ -1,7 +1,13 @@
 import { normalizeStates } from './home-assistant.js';
 
 export function demoEntities() {
-  const now = new Date().toISOString();
+  const nowMs = Date.now();
+  const now = new Date(nowMs).toISOString();
+  const forecastStart = Math.ceil(nowMs / (15 * 60 * 1000)) * (15 * 60 * 1000);
+  const quarterForecast = (base, step) => Array.from({ length: 96 }, (_, index) => ({
+    start: new Date(forecastStart + index * 15 * 60 * 1000).toISOString(),
+    value: Number((base + ((index % 12) - 6) * step).toFixed(6))
+  }));
   const sensor = (entity_id, friendly_name, state, unit, device_class) => ({
     entity_id, state: String(state), last_updated: now,
     attributes: { friendly_name, unit_of_measurement: unit, device_class }
@@ -46,8 +52,8 @@ export function demoEntities() {
     { ...sensor('sensor.demo_electricity_high', 'Slimme meter · Hoog tarief', 860, 'kWh', 'energy'), attributes: { friendly_name: 'Slimme meter · Hoog tarief', unit_of_measurement: 'kWh', device_class: 'energy', state_class: 'total_increasing' } },
     { ...sensor('sensor.demo_electricity_return_low', 'Slimme meter · Teruglevering laag tarief', 420, 'kWh', 'energy'), attributes: { friendly_name: 'Slimme meter · Teruglevering laag tarief', unit_of_measurement: 'kWh', device_class: 'energy', state_class: 'total_increasing' } },
     { ...sensor('sensor.demo_electricity_return_high', 'Slimme meter · Teruglevering hoog tarief', 330, 'kWh', 'energy'), attributes: { friendly_name: 'Slimme meter · Teruglevering hoog tarief', unit_of_measurement: 'kWh', device_class: 'energy', state_class: 'total_increasing' } },
-    sensor('sensor.demo_price_low', 'Energietarief · Laag', 0.24, 'EUR/kWh', 'monetary'),
-    sensor('sensor.demo_price_high', 'Energietarief · Hoog', 0.32, 'EUR/kWh', 'monetary'),
+    { ...sensor('sensor.demo_price_low', 'Energietarief · Laag', 0.24, 'EUR/kWh', 'monetary'), attributes: { friendly_name: 'Energietarief · Laag', unit_of_measurement: 'EUR/kWh', device_class: 'monetary', forecast_interval: '15min', forecast: quarterForecast(0.24, 0.004) } },
+    { ...sensor('sensor.demo_price_high', 'Energietarief · Hoog', 0.32, 'EUR/kWh', 'monetary'), attributes: { friendly_name: 'Energietarief · Hoog', unit_of_measurement: 'EUR/kWh', device_class: 'monetary', forecast_interval: '15min', forecast: quarterForecast(0.32, 0.006) } },
     sensor('sensor.demo_price_gas', 'Gastarief', 1.28, 'EUR/m³', 'monetary'),
     sensor('sensor.demo_price_water', 'Watertarief', 1.55, 'EUR/m³', 'monetary'),
     { ...sensor('sensor.solaredge_i1_ac_energy', 'SolarEdge · Opwek allertijden (voorbeeld)', 12504.2, 'kWh', 'energy'), attributes: { friendly_name: 'SolarEdge · Opwek allertijden (voorbeeld)', unit_of_measurement: 'kWh', device_class: 'energy', state_class: 'total_increasing' } },

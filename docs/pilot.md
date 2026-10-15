@@ -28,4 +28,4 @@ Controleer temperatuurdoel-terugmelding voordat verwarmmodus wordt ingeschakeld.
 
 ## Releasebesluit
 
-Pas na geslaagde installatie-, back-up-, veiligheids- en apparaattests komen een publieke repository/image, licentie, contactpersoon en release aan bod. CI moet de amd64- en arm64-images daadwerkelijk bouwen en starten. Een eigen repository toevoegen aan de Store is iets anders dan toelating tot een beheerde catalogus.
+Pas na geslaagde installatie-, back-up-, veiligheids- en apparaattests komen een publieke repository/image, licentie, contactpersoon en release aan bod. CI moet de amd64- en arm64-images daadwerkelijk bouwen en starten.

@@ -1,5 +1,6 @@
 import { createIcons, Activity, Link, SlidersHorizontal, RefreshCw, HousePlug, House, Sun, Moon, Flame, Droplet, Plug, Car, Heater, BatteryCharging, Battery, Thermometer, ArrowUpRight, ArrowDownLeft, Lock, Unlock, Clock3, EllipsisVertical, Power, Save, Search, Check, Unplug, Plus, Pencil, Trash2, X, ListChecks, Pause, Play, Menu, Minus, CloudLightning, ChevronDown } from 'lucide';
 import { Chart } from 'chart.js/auto';
+import { DateTime } from 'luxon';
 import { createId } from './ids.js';
 import { climateStatus, modeLabel, onlyRoomTargetChanged } from './status.js';
 import { formatPower } from './power.js';
@@ -43,6 +44,8 @@ let energyCostsCache;
 let energyCostsCacheKey;
 let energyCostsFetchedAt = 0;
 let energyCostsRequest;
+let tariffHistoryCache;
+let tariffHistoryRequest;
 const liveBindings = new Map();
 let solarLimitConsentEntity;
 let solarLimitPending = false;
@@ -164,7 +167,7 @@ async function refresh(showButtonProgress = false) {
     mappingsDraft ??= { ...data.mappings };
     preferencesDraft ??= { ...data.preferences };
     controlDraft ??= structuredClone(data.control);
-    document.querySelector('#mode-label').textContent = `v0.1 · ${modeLabel({ demo: data.demo, activeAllowed: data.controlStatus?.activeAllowed, mode: data.control?.mode })}`;
+    document.querySelector('#mode-label').textContent = `V2.0 · ${modeLabel({ demo: data.demo, activeAllowed: data.controlStatus?.activeAllowed, mode: data.control?.mode })}`;
     document.querySelector('#connection').textContent = data.demo ? 'Voorbeeldwoning · Demodata' : data.message;
     document.querySelector('#connection').className = data.demo ? 'demo-status' : data.connected ? 'connected-status' : 'offline-status';
     document.querySelector('#timestamp').textContent = `Opgehaald om ${formatTime(data.fetchedAt)}`;
@@ -523,6 +526,7 @@ function overview() {
   }
   main.append(section);
   consumptionSplit();
+  dynamicPriceForecast();
   batteriesOverview();
   heatOverview();
   if (data.preferences.showGas) utilityPanel('gas');
@@ -536,6 +540,85 @@ function overview() {
   button.addEventListener('click', () => navigate('entities'));
   status.append(statusText, button);
   main.append(status);
+}
+
+function dynamicPriceForecast() {
+  const costs = data.preferences.costs ?? {};
+  if (!Object.values(costs).some(resource => resource?.contractType === 'dynamic')) return;
+  const rates = [];
+  const addRates = (resource, label, unit, slots) => {
+    if (resource?.contractType !== 'dynamic') return;
+    for (const [suffix, rate] of slots) {
+      if (rate?.source !== 'entity' || !rate.entityId) continue;
+      const entity = data.entities.find(item => item.id === rate.entityId);
+      rates.push({ label: `${label} · ${suffix}`, unit, points: entity?.priceForecast ?? [] });
+    }
+  };
+  const electricity = costs.electricity;
+  addRates(electricity, 'Afname', 'kWh', electricity?.rateMode === 'dual'
+    ? [['Laag', electricity.lowRate], ['Hoog', electricity.highRate]] : [['Stroom', electricity?.rate]]);
+  const feedIn = costs.feedIn;
+  addRates(feedIn, 'Teruglevering', 'kWh', feedIn?.rateMode === 'dual'
+    ? [['Laag', feedIn.lowRate], ['Hoog', feedIn.highRate]] : [['Teruglevering', feedIn?.rate]]);
+  addRates(costs.gas, 'Gas', 'm³', [['Gas', costs.gas?.rate]]);
+  addRates(costs.water, 'Water', 'm³', [['Water', costs.water?.rate]]);
+
+  const section = element('section', 'price-forecast-panel');
+  const header = element('div', 'section-heading');
+  header.append(element('h2', '', 'Dynamische prijzen · komende 24 uur'));
+  section.append(header);
+  const now = Date.now();
+  const cutoff = now + 24 * 60 * 60 * 1000;
+  const groups = new Map();
+  for (const rate of rates) {
+    const points = rate.points.filter(point => point.at >= now - 60_000 && point.at <= cutoff && Number.isFinite(point.value));
+    if (!groups.has(rate.unit)) groups.set(rate.unit, []);
+    groups.get(rate.unit).push({ ...rate, points });
+  }
+  const availableGroups = [...groups].filter(([, groupRates]) => groupRates.some(rate => rate.points.length));
+  if (!availableGroups.length) {
+    section.append(element('p', 'price-forecast-status muted', 'Geen prijsvooruitblik beschikbaar voor de gekoppelde dynamische prijssensoren.'));
+    main.append(section);
+    return;
+  }
+  const colors = ['#18845f', '#d29a18', '#3b7895', '#bf5c48'];
+  for (const [unit, groupRates] of availableGroups) {
+    const timestamps = [...new Set(groupRates.flatMap(rate => rate.points.map(point => point.at)))].sort((a, b) => a - b);
+    const chartSection = element('div', 'price-forecast-chart-section');
+    chartSection.append(element('h3', '', `Prijs (${unit})`));
+    const wrapper = element('div', 'price-forecast-chart');
+    const canvas = element('canvas');
+    canvas.setAttribute('role', 'img');
+    canvas.setAttribute('aria-label', `Dynamische prijs per ${unit} voor de komende 24 uur`);
+    wrapper.append(canvas); chartSection.append(wrapper); section.append(chartSection);
+    const labels = timestamps.map(at => new Intl.DateTimeFormat('nl-NL', {
+      timeZone: 'Europe/Amsterdam', weekday: 'short', hour: '2-digit', minute: '2-digit'
+    }).format(new Date(at)));
+    const values = new Map(groupRates.map(rate => [rate.label, new Map(rate.points.map(point => [point.at, point.value]))]));
+    const chart = new Chart(canvas, {
+      type: 'line',
+      data: { labels, datasets: groupRates.map((rate, index) => ({
+        label: rate.label, data: timestamps.map(at => values.get(rate.label).get(at) ?? null),
+        borderColor: colors[index % colors.length], backgroundColor: colors[index % colors.length],
+        borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: 0.18, spanGaps: false
+      })) },
+      options: {
+        responsive: true, maintainAspectRatio: false, interaction: { intersect: false, mode: 'index' },
+        plugins: { legend: { display: groupRates.length > 1 }, tooltip: { callbacks: {
+          label: context => `${context.dataset.label}: ${new Intl.NumberFormat('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 6 }).format(context.parsed.y)} €/${unit}`
+        } } },
+        scales: {
+          x: { grid: { display: false }, ticks: { color: getComputedStyle(document.documentElement).getPropertyValue('--muted').trim(), maxTicksLimit: 8, maxRotation: 0 } },
+          y: { grid: { color: getComputedStyle(document.documentElement).getPropertyValue('--line').trim() },
+            ticks: { color: getComputedStyle(document.documentElement).getPropertyValue('--muted').trim() },
+            title: { display: true, text: `€/${unit}`, color: getComputedStyle(document.documentElement).getPropertyValue('--muted').trim() } }
+        },
+        animation: { duration: 180 }
+      }
+    });
+    utilityCharts.push({ utility: 'price-forecast', chart });
+  }
+  main.append(section);
 }
 
 function consumptionSplit() {
@@ -2368,118 +2451,6 @@ function preferences() {
     utilitySection.append(label);
   }
   form.append(utilitySection);
-  const energyCostsSection = element('section', 'preference-section energy-cost-settings');
-  energyCostsSection.append(element('h2', '', 'Financieel'));
-  preferencesDraft.costs ??= {
-    electricity: { enabled: false, rateMode: 'single', rate: { source: 'manual', value: null, entityId: null }, lowRate: { source: 'manual', value: null, entityId: null }, highRate: { source: 'manual', value: null, entityId: null } },
-    feedIn: { enabled: false, rateMode: 'single', rate: { source: 'manual', value: null, entityId: null }, lowRate: { source: 'manual', value: null, entityId: null }, highRate: { source: 'manual', value: null, entityId: null } },
-    gas: { enabled: false, rate: { source: 'manual', value: null, entityId: null } },
-    water: { enabled: false, rate: { source: 'manual', value: null, entityId: null } }
-  };
-  for (const key of ['electricity', 'feedIn']) {
-    const resource = preferencesDraft.costs[key];
-    resource.rateMode ??= 'single';
-    resource.lowRate ??= { source: 'manual', value: null, entityId: null };
-    resource.highRate ??= { source: 'manual', value: null, entityId: null };
-  }
-  function costRateControl(parent, title, rate, unit) {
-    const rateFields = element('div', 'cost-rate-fields');
-    rateFields.append(element('strong', 'cost-rate-title', title));
-    const sourceLabel = element('label', 'mapping-setting');
-    sourceLabel.append(element('span', '', 'Tariefbron'));
-    const source = element('select');
-    for (const [value, text] of [['manual', 'Zelf invullen'], ['entity', 'Prijsentiteit']]) {
-      const option = element('option', '', text); option.value = value; source.append(option);
-    }
-    source.value = rate.source;
-    source.addEventListener('change', () => { rate.source = source.value; update(); });
-    sourceLabel.append(source);
-
-    const manualLabel = element('label', 'mapping-setting');
-    manualLabel.append(element('span', '', `Prijs (${unit})`));
-    const manual = element('input', 'text-input');
-    manual.type = 'number'; manual.min = '0'; manual.max = '100'; manual.step = '0.000001';
-    manual.value = rate.value ?? '';
-    manual.addEventListener('input', () => { rate.value = manual.value === '' ? null : Number(manual.value); });
-    manualLabel.append(manual);
-
-    const entityLabel = element('label', 'mapping-setting');
-    entityLabel.append(element('span', '', `Prijsentiteit (${unit})`));
-    const entitySelect = element('select');
-    const expected = unit.toLowerCase().replaceAll('³', '3').replaceAll('€', 'eur').replaceAll(' ', '');
-    const unitMatches = entity => String(entity.unit).toLowerCase().replaceAll('³', '3').replaceAll('€', 'eur').replaceAll(' ', '') === expected;
-    const candidates = data.entities.filter(entity => entity.domain === 'sensor' && unitMatches(entity));
-    entitySelect.append(element('option', '', 'Selecteer prijsentiteit'));
-    entitySelect.firstElementChild.value = '';
-    for (const entity of candidates) {
-      const option = element('option', '', `${entity.name} (${entity.id})`); option.value = entity.id; entitySelect.append(option);
-    }
-    if (rate.entityId && !candidates.some(entity => entity.id === rate.entityId)) {
-      const missing = element('option', '', `${rate.entityId} · niet beschikbaar`); missing.value = rate.entityId; entitySelect.append(missing);
-    }
-    entitySelect.value = rate.entityId ?? '';
-    entitySelect.addEventListener('change', () => { rate.entityId = entitySelect.value || null; });
-    entityLabel.append(entitySelect);
-    rateFields.append(sourceLabel, manualLabel, entityLabel);
-    function update() {
-      manualLabel.hidden = rate.source !== 'manual';
-      entityLabel.hidden = rate.source !== 'entity';
-    }
-    update();
-    parent.append(rateFields);
-  }
-  for (const [key, title, singleTitle, lowTitle, highTitle, unit] of [
-    ['electricity', 'Stroom', 'All-in stroomtarief', 'Laag tarief', 'Hoog tarief', '€/kWh'],
-    ['feedIn', 'Terugleveropbrengst', 'Terugleververgoeding', 'Vergoeding laag', 'Vergoeding hoog', '€/kWh'],
-    ['gas', 'Gas', 'Gasprijs', null, null, '€/m³'],
-    ['water', 'Water', 'Waterprijs', null, null, '€/m³']
-  ]) {
-    const resource = preferencesDraft.costs[key];
-    const setting = element('div', 'energy-cost-option');
-    const label = element('label', 'checkbox-field');
-    const enabled = element('input'); enabled.type = 'checkbox'; enabled.checked = resource.enabled;
-    const fields = element('div', 'energy-cost-option-fields'); fields.hidden = !resource.enabled;
-    enabled.addEventListener('change', () => { resource.enabled = enabled.checked; fields.hidden = !enabled.checked; });
-    label.append(enabled, element('strong', '', `${title} opnemen in overzicht`));
-    setting.append(label);
-    const rates = element('div', 'energy-cost-rates');
-    if (lowTitle) {
-      resource.rateMode ??= 'single';
-      const modeLabel = element('label', 'mapping-setting');
-      modeLabel.append(element('span', '', 'Aantal tarieven'));
-      const mode = element('select');
-      for (const [value, modeTitle] of [['single', 'Eén tarief voor laag en hoog'], ['dual', 'Apart tarief voor laag en hoog']]) {
-        const option = element('option', '', modeTitle); option.value = value; mode.append(option);
-      }
-      mode.value = resource.rateMode;
-      mode.addEventListener('change', () => {
-        if (mode.value === 'dual' && resource.rateMode !== 'dual') {
-          const single = structuredClone(resource.rate);
-          for (const rateKey of ['lowRate', 'highRate']) {
-            if (resource[rateKey].value === null && !resource[rateKey].entityId) resource[rateKey] = structuredClone(single);
-          }
-        } else if (mode.value === 'single' && resource.rateMode === 'dual' && resource.rate.value === null && !resource.rate.entityId) {
-          resource.rate = structuredClone(resource.lowRate);
-        }
-        resource.rateMode = mode.value;
-        renderRates();
-      });
-      fields.append(modeLabel, mode);
-    }
-    function renderRates() {
-      rates.replaceChildren();
-      if (!lowTitle) costRateControl(rates, singleTitle, resource.rate, unit);
-      else if (resource.rateMode === 'dual') {
-        costRateControl(rates, lowTitle, resource.lowRate, unit);
-        costRateControl(rates, highTitle, resource.highRate, unit);
-      } else costRateControl(rates, singleTitle, resource.rate, unit);
-    }
-    renderRates();
-    fields.append(rates);
-    setting.append(fields);
-    energyCostsSection.append(setting);
-  }
-  form.append(energyCostsSection);
   const refreshSection = element('section', 'preference-section');
   refreshSection.append(element('h2', '', 'Metingen verversen'));
   const refreshLabel = element('label', 'mapping-setting');
@@ -2550,6 +2521,310 @@ function preferences() {
     finally { save.disabled = false; }
   });
   main.append(form);
+}
+
+function emptyTariffRate() {
+  return { source: 'manual', value: null, entityId: null };
+}
+
+function costRateControl(parent, title, rate, unit, contractType) {
+  const rateFields = element('div', 'cost-rate-fields');
+  rateFields.append(element('strong', 'cost-rate-title', title));
+  const manualLabel = element('label', 'mapping-setting');
+  manualLabel.append(element('span', '', `Vast tarief (${unit})`));
+  const manual = element('input', 'text-input');
+  manual.type = 'number'; manual.min = '0'; manual.max = '100'; manual.step = '0.000001';
+  manual.value = rate.value ?? '';
+  manual.addEventListener('input', () => { rate.value = manual.value === '' ? null : Number(manual.value); });
+  manualLabel.append(manual);
+
+  const entityLabel = element('label', 'mapping-setting');
+  entityLabel.append(element('span', '', `Prijsentiteit (${unit})`));
+  const entitySelect = element('select');
+  const expected = unit.toLowerCase().replaceAll('³', '3').replaceAll('€', 'eur').replaceAll(' ', '');
+  const unitMatches = entity => String(entity.unit).toLowerCase().replaceAll('³', '3').replaceAll('€', 'eur').replaceAll(' ', '') === expected;
+  const candidates = data.entities.filter(entity => entity.domain === 'sensor' && unitMatches(entity));
+  entitySelect.append(element('option', '', 'Selecteer prijsentiteit'));
+  entitySelect.firstElementChild.value = '';
+  for (const entity of candidates) {
+    const option = element('option', '', `${entity.name} (${entity.id})`); option.value = entity.id; entitySelect.append(option);
+  }
+  if (rate.entityId && !candidates.some(entity => entity.id === rate.entityId)) {
+    const missing = element('option', '', `${rate.entityId} · niet beschikbaar`); missing.value = rate.entityId; entitySelect.append(missing);
+  }
+  entitySelect.value = rate.entityId ?? '';
+  entitySelect.addEventListener('change', () => { rate.entityId = entitySelect.value || null; });
+  entityLabel.append(entitySelect);
+  manualLabel.hidden = contractType !== 'fixed';
+  entityLabel.hidden = contractType !== 'dynamic';
+  rateFields.append(manualLabel, entityLabel);
+  if (contractType === 'fixed') {
+    rate.futureRates ??= [];
+    const schedule = element('div', 'tariff-schedule');
+    schedule.append(element('strong', '', 'Toekomstig tarief'));
+    schedule.append(element('small', 'muted', 'Maximaal 2 ingeplande prijzen per tarief.'));
+    const inputs = element('div', 'tariff-schedule-inputs');
+    const dateLabel = element('label', 'mapping-setting');
+    dateLabel.append(element('span', '', 'Ingangsdatum'));
+    const date = element('input', 'text-input');
+    date.type = 'date';
+    date.min = DateTime.now().setZone('Europe/Amsterdam').plus({ days: 1 }).toISODate();
+    date.addEventListener('input', () => {
+      add.disabled = rate.futureRates.length >= 2 && !rate.futureRates.some(item => item.effectiveDate === date.value);
+    });
+    dateLabel.append(date);
+    const valueLabel = element('label', 'mapping-setting');
+    valueLabel.append(element('span', '', `Nieuw tarief (${unit})`));
+    const futureValue = element('input', 'text-input');
+    futureValue.type = 'number'; futureValue.min = '0'; futureValue.max = '100'; futureValue.step = '0.000001';
+    valueLabel.append(futureValue);
+    const add = element('button', 'secondary-button tariff-schedule-add', 'Tarief plannen');
+    add.type = 'button'; add.prepend(icon('plus'));
+    inputs.append(dateLabel, valueLabel, add);
+    const rows = element('div', 'tariff-schedule-list');
+    function renderScheduledRates() {
+      rows.replaceChildren();
+      for (const [index, item] of rate.futureRates.entries()) {
+        const row = element('div', 'tariff-schedule-row');
+        row.append(element('span', '', `Vanaf ${item.effectiveDate}`), element('strong', '', `${new Intl.NumberFormat('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 6 }).format(item.value)} ${unit}`));
+        row.append(toolButton('trash-2', 'Toekomstig tarief verwijderen', () => {
+          rate.futureRates.splice(index, 1);
+          renderScheduledRates();
+        }));
+        rows.append(row);
+      }
+      add.disabled = rate.futureRates.length >= 2 && !rate.futureRates.some(item => item.effectiveDate === date.value);
+    }
+    add.addEventListener('click', () => {
+      const today = DateTime.now().setZone('Europe/Amsterdam').toISODate();
+      const numericValue = Number(futureValue.value);
+      if (!date.value || date.value <= today || futureValue.value === '' || !Number.isFinite(numericValue) || numericValue < 0 || numericValue > 100) {
+        notify('Kies een toekomstige datum en een geldig tarief.', true);
+        return;
+      }
+      const existing = rate.futureRates.find(item => item.effectiveDate === date.value);
+      if (existing) existing.value = numericValue;
+      else if (rate.futureRates.length < 2) rate.futureRates.push({ effectiveDate: date.value, value: numericValue });
+      else { notify('Er kunnen maximaal twee toekomstige tarieven per prijs worden gepland.', true); return; }
+      rate.futureRates.sort((a, b) => a.effectiveDate.localeCompare(b.effectiveDate));
+      date.value = ''; futureValue.value = '';
+      renderScheduledRates();
+    });
+    renderScheduledRates();
+    schedule.append(inputs, rows);
+    rateFields.append(schedule);
+  }
+  parent.append(rateFields);
+}
+
+async function tariffHistoryData(reload = false) {
+  if (!reload && tariffHistoryCache && Date.now() - tariffHistoryCache.fetchedAt < 30000) return tariffHistoryCache;
+  if (!tariffHistoryRequest) {
+    tariffHistoryRequest = api('tariff-history', { cache: 'no-store' }).then(result => {
+      tariffHistoryCache = { ...result, fetchedAt: Date.now() };
+      return tariffHistoryCache;
+    }).finally(() => { tariffHistoryRequest = undefined; });
+  }
+  return tariffHistoryRequest;
+}
+
+function tariffsView() {
+  preferencesDraft ??= structuredClone(data.preferences);
+  preferencesDraft.costs ??= structuredClone(data.preferences.costs);
+  const costs = preferencesDraft.costs;
+  const section = element('section', 'tariffs-page');
+  heading('Tarieven', 'Contracten en prijshistorie');
+  const form = element('form', 'tariffs-form');
+
+  for (const [key, title, unit, supportsDual, supportsDynamic] of [
+    ['electricity', 'Stroomverbruik', '€/kWh', true, true],
+    ['feedIn', 'Teruglevering', '€/kWh', true, true],
+    ['gas', 'Gas', '€/m³', false, true],
+    ['water', 'Water', '€/m³', false, false]
+  ]) {
+    const resource = costs[key];
+    resource.contractType = supportsDynamic ? resource.contractType ?? ([resource.rate, resource.lowRate, resource.highRate].some(rate => rate?.source === 'entity') ? 'dynamic' : 'fixed') : 'fixed';
+    resource.interval ??= 'hour';
+    resource.rate ??= emptyTariffRate();
+    if (supportsDual) {
+      resource.lowRate ??= emptyTariffRate();
+      resource.highRate ??= emptyTariffRate();
+    }
+    if (!supportsDynamic) { resource.rate.source = 'manual'; resource.rate.entityId = null; }
+    const card = element('section', 'tariff-resource');
+    const header = element('div', 'tariff-resource-heading');
+    const enabledLabel = element('label', 'checkbox-field');
+    const enabled = element('input'); enabled.type = 'checkbox'; enabled.checked = Boolean(resource.enabled);
+    enabled.addEventListener('change', () => { resource.enabled = enabled.checked; });
+    enabledLabel.append(enabled, element('strong', '', `Tonen in Financieel · ${title}`));
+    header.append(enabledLabel);
+    card.append(header);
+
+    const controls = element('div', 'tariff-resource-controls');
+    const contractLabel = element('label', 'mapping-setting');
+    contractLabel.append(element('span', '', 'Contracttype'));
+    const contract = element('select');
+    for (const [value, label] of (supportsDynamic ? [['fixed', 'Vast contract'], ['dynamic', 'Dynamisch contract']] : [['fixed', 'Vast contract']])) {
+      const option = element('option', '', label); option.value = value; contract.append(option);
+    }
+    contract.value = resource.contractType;
+    contract.disabled = !supportsDynamic;
+    contractLabel.append(contract); controls.append(contractLabel);
+    const intervalLabel = element('label', 'mapping-setting tariff-interval-setting');
+    intervalLabel.append(element('span', '', 'Prijsinterval'));
+    const interval = element('select');
+    for (const [value, label] of [['15min', 'Per 15 minuten'], ['hour', 'Per uur'], ['day', 'Per dag']]) {
+      const option = element('option', '', label); option.value = value; interval.append(option);
+    }
+    interval.value = resource.interval;
+    interval.addEventListener('change', () => { resource.interval = interval.value; });
+    intervalLabel.append(interval);
+    intervalLabel.hidden = !supportsDynamic || resource.contractType !== 'dynamic';
+    if (supportsDynamic) controls.append(intervalLabel);
+
+    const rateFields = element('div', 'tariff-rate-list');
+    function getRateSlots() {
+      if (!supportsDual || resource.rateMode !== 'dual') return [['rate', key === 'electricity' ? 'All-in stroomtarief' : key === 'feedIn' ? 'Terugleververgoeding' : title, unit]];
+      return [['lowRate', 'Laag tarief', unit], ['highRate', 'Hoog tarief', unit]];
+    }
+    function renderRateFields() {
+      rateFields.replaceChildren();
+      for (const [rateKey, label, rateUnit] of getRateSlots()) {
+        resource[rateKey].source = resource.contractType === 'dynamic' ? 'entity' : 'manual';
+        costRateControl(rateFields, label, resource[rateKey], rateUnit, resource.contractType);
+      }
+    }
+    if (supportsDual) {
+      resource.rateMode ??= 'single';
+      const modeLabel = element('label', 'mapping-setting');
+      modeLabel.append(element('span', '', 'Aantal tarieven'));
+      const rateMode = element('select');
+      for (const [value, label] of [['single', 'Eén tarief voor laag en hoog'], ['dual', 'Apart laag- en hoogtarief']]) {
+        const option = element('option', '', label); option.value = value; rateMode.append(option);
+      }
+      rateMode.value = resource.rateMode;
+      rateMode.addEventListener('change', () => {
+        if (rateMode.value === 'dual' && resource.rateMode !== 'dual') {
+          const single = structuredClone(resource.rate);
+          for (const rateKey of ['lowRate', 'highRate']) {
+            if (resource[rateKey].value === null && !resource[rateKey].entityId) resource[rateKey] = structuredClone(single);
+          }
+        } else if (rateMode.value === 'single' && resource.rateMode === 'dual' && resource.rate.value === null && !resource.rate.entityId) {
+          resource.rate = structuredClone(resource.lowRate);
+        }
+        resource.rateMode = rateMode.value;
+        renderRateFields();
+      });
+      modeLabel.append(rateMode);
+      controls.append(modeLabel);
+    }
+    if (supportsDynamic) contract.addEventListener('change', () => {
+      resource.contractType = contract.value;
+      for (const [rateKey] of getRateSlots()) resource[rateKey].source = contract.value === 'dynamic' ? 'entity' : 'manual';
+      intervalLabel.hidden = contract.value !== 'dynamic';
+      renderRateFields();
+    });
+    renderRateFields();
+    card.append(controls, rateFields);
+    form.append(card);
+  }
+
+  const actions = element('div', 'form-actions');
+  const save = element('button', 'primary-button', 'Tarieven opslaan');
+  save.type = 'submit'; save.prepend(icon('save')); actions.append(save); form.append(actions);
+  form.addEventListener('submit', async event => {
+    event.preventDefault(); save.disabled = true;
+    try {
+      const result = await api('preferences', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(preferencesDraft) });
+      preferencesDraft = result.preferences;
+      tariffHistoryCache = undefined;
+      notify('Tarieven opgeslagen; historie bijgewerkt.');
+      await refresh();
+    } catch (error) { notify(error.message, true); }
+    finally { save.disabled = false; }
+  });
+  section.append(form);
+
+  const historySection = element('section', 'tariff-history-section');
+  const historyHeading = element('div', 'section-heading');
+  historyHeading.append(element('h2', '', 'Tariefhistorie'));
+  historyHeading.append(toolButton('refresh-cw', 'Historie vernieuwen', async () => {
+    tariffHistoryCache = undefined;
+    historyStatus.textContent = 'Historie ophalen…';
+    try { historyData = await tariffHistoryData(true); renderHistory(); }
+    catch (error) { historyStatus.textContent = error.message; }
+  }));
+  historySection.append(historyHeading);
+  historySection.append(element('p', 'muted tariff-history-note', 'Kosten gebruiken Home Assistant-verbruik per uur; kwartierprijzen worden binnen dat uur tijdgewogen.'));
+  const historyControls = element('div', 'tariff-history-controls');
+  const rateLabel = element('label', 'mapping-setting'); rateLabel.append(element('span', '', 'Tarief'));
+  const rateSelect = element('select'); rateLabel.append(rateSelect);
+  const periodLabel = element('label', 'mapping-setting'); periodLabel.append(element('span', '', 'Weergave'));
+  const periodSelect = element('select');
+  for (const [value, label] of [['15min', 'Per 15 minuten'], ['hour', 'Per uur'], ['day', 'Per dag']]) {
+    const option = element('option', '', label); option.value = value; periodSelect.append(option);
+  }
+  periodLabel.append(periodSelect); historyControls.append(rateLabel, periodLabel); historySection.append(historyControls);
+  const historyStatus = element('p', 'tariff-history-status muted', 'Tariefhistorie ophalen…');
+  const tableWrap = element('div', 'tariff-history-table-wrap');
+  historySection.append(historyStatus, tableWrap);
+  section.append(historySection);
+  main.append(section);
+
+  let historyData;
+  function renderHistory() {
+    const rates = historyData?.rates ?? [];
+    rateSelect.replaceChildren();
+    for (const rate of rates) {
+      const option = element('option', '', rate.label); option.value = rate.key; rateSelect.append(option);
+    }
+    if (!rates.length) {
+      historyStatus.textContent = 'Nog geen tarieven ingesteld.';
+      tableWrap.replaceChildren();
+      return;
+    }
+    if (!rates.some(rate => rate.key === rateSelect.value)) rateSelect.value = rates.find(rate => rate.samples.length)?.key ?? rates[0].key;
+    const rate = rates.find(item => item.key === rateSelect.value);
+    if (!periodSelect.dataset.initialized) {
+      periodSelect.value = rate.interval ?? 'hour';
+      periodSelect.dataset.initialized = 'true';
+    }
+    const resolution = periodSelect.value;
+    const now = DateTime.now().setZone('Europe/Amsterdam');
+    const period = resolution === '15min' ? 15 * 60 * 1000 : resolution === 'hour' ? 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
+    const rowLimit = resolution === '15min' ? 96 : resolution === 'hour' ? 168 : 45;
+    const grouped = new Map();
+    for (const sample of rate.samples ?? []) {
+      const date = DateTime.fromMillis(sample.at, { zone: 'Europe/Amsterdam' });
+      const bucket = resolution === 'day' ? date.startOf('day') : resolution === 'hour' ? date.startOf('hour') : date.startOf('hour').set({ minute: Math.floor(date.minute / 15) * 15, second: 0, millisecond: 0 });
+      grouped.set(bucket.toMillis(), sample.value);
+    }
+    const cutoff = now.toMillis() - rowLimit * period;
+    const rows = [...grouped].filter(([at]) => at >= cutoff && at <= now.toMillis()).sort(([a], [b]) => b - a).slice(0, rowLimit);
+    historyStatus.textContent = rows.length ? `Opgeslagen historie · maximaal ${historyData.retentionDays} dagen` : 'Nog geen historie voor dit tarief. Nieuwe waarden worden vanaf nu bewaard.';
+    const table = element('table', 'tariff-history-table');
+    const head = element('thead');
+    const headerRow = element('tr');
+    headerRow.append(element('th', '', 'Tijdvak'), element('th', '', 'Tarief'));
+    head.append(headerRow);
+    const body = element('tbody');
+    const formatter = new Intl.DateTimeFormat('nl-NL', resolution === 'day'
+      ? { timeZone: 'Europe/Amsterdam', weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' }
+      : { timeZone: 'Europe/Amsterdam', day: '2-digit', month: 'short', hour: '2-digit', minute: resolution === '15min' ? '2-digit' : undefined });
+    for (const [at, value] of rows) {
+      const row = element('tr');
+      row.append(element('td', '', formatter.format(new Date(at))));
+      row.append(element('td', '', value === null ? 'Niet beschikbaar' : `${new Intl.NumberFormat('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 6 }).format(value)} €/${rate.unit}`));
+      body.append(row);
+    }
+    table.append(head, body); tableWrap.replaceChildren(table);
+  }
+  rateSelect.addEventListener('change', renderHistory);
+  periodSelect.addEventListener('change', renderHistory);
+  tariffHistoryData().then(result => {
+    if (!section.isConnected) return;
+    historyData = result; renderHistory();
+  }).catch(error => { historyStatus.textContent = error.message; });
 }
 
 async function utilityHistoryData(utility, entityId, reload = false) {
@@ -3471,7 +3746,7 @@ function render() {
   utilityCharts = [];
   main.replaceChildren();
   main.setAttribute('aria-busy', 'false');
-  ({ overview, thermal, rules: rulesView, entities, preferences, ev: () => deviceDetail('ev'), battery: () => deviceDetail('battery'), solar: () => deviceDetail('solar') })[view]();
+  ({ overview, thermal, rules: rulesView, entities, tariffs: tariffsView, preferences, ev: () => deviceDetail('ev'), battery: () => deviceDetail('battery'), solar: () => deviceDetail('solar') })[view]();
   createIcons({ icons });
 }
 function navigate(next) {
@@ -3527,6 +3802,7 @@ function updateChartTheme() {
       chart.options.scales.y.grid.color = line;
       chart.options.scales.y.ticks.color = muted;
       chart.options.scales.y.title.color = muted;
+      if (item.utility === 'price-forecast' && chart.options.plugins.legend.display) chart.options.plugins.legend.labels.color = muted;
     }
     chart.update('none');
   }
@@ -3544,6 +3820,7 @@ function applyTheme(theme, persist = false) {
   themeToggle.setAttribute('aria-label', dark ? 'Lichte modus inschakelen' : 'Donkere modus inschakelen');
   themeToggle.title = dark ? 'Lichte modus inschakelen' : 'Donkere modus inschakelen';
   themeToggle.replaceChildren(icon(dark ? 'sun' : 'moon'));
+  createIcons({ icons });
   document.querySelector('meta[name="theme-color"]').content = dark ? '#151c19' : '#17694d';
   updateChartTheme();
   if (persist) {

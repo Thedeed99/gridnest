@@ -61,14 +61,18 @@ test('dynamische prijs wordt per uur tijdgewogen en ontbrekende prijshistorie bl
   assert.match(missing.resources[0].status, /tarief/i);
 });
 
-test('prijsopname volgt alleen actieve sensoren en bewaart negatieve of onbeschikbare tarieven', async () => {
+test('prijsopname bewaart vaste en dynamische tarieven, ook negatieve of onbeschikbare waarden', async () => {
   const recorded = [];
   const priceHistory = { record: async (...sample) => recorded.push(sample) };
   await recordEnergyPrices({ ...costs, electricity: { ...costs.electricity, rate: { source: 'entity', value: null, entityId: 'sensor.high_rate' } } }, [
     { id: 'sensor.high_rate', domain: 'sensor', state: '-0.04', unit: '€/kWh', available: true },
     { id: 'sensor.water_rate', domain: 'sensor', state: 'unknown', unit: 'EUR/m³', available: false }
   ], priceHistory, 1234);
-  assert.deepEqual(recorded, [['sensor.high_rate', -0.04, 1234], ['sensor.water_rate', null, 1234]]);
+  assert.deepEqual(recorded, [
+    ['sensor.high_rate', -0.04, 1234, 55 * 60 * 1000],
+    ['rate.gas_single', 1.25, 1234, 23 * 60 * 60 * 1000],
+    ['sensor.water_rate', null, 1234, 55 * 60 * 1000]
+  ]);
 });
 
 test('kosten blijven verborgen als de bron uit staat en missen geen tarief stilzwijgend', () => {
@@ -222,4 +226,53 @@ test('ontbrekende maandprijzen verbergen een bekende dagopbrengst niet', () => {
   assert.equal(missing.today, null);
   const zero = summarizeEnergyCosts({ ...options, statistics: { 'sensor.export': [{ end: Date.parse('2026-10-15T11:00:00Z'), change: 0 }] } }).resources[0];
   assert.equal(zero.today, 0);
+});
+
+test('dynamische tarieven gebruiken de gekozen kwartiercadans', async () => {
+  const recorded = [];
+  await recordEnergyPrices({
+    electricity: { enabled: true, contractType: 'dynamic', interval: '15min', rateMode: 'single',
+      rate: { source: 'entity', entityId: 'sensor.dynamic_quarter_price' } },
+    feedIn: { enabled: false, rate: { source: 'manual', value: null } },
+    gas: { enabled: false, rate: { source: 'manual', value: null } },
+    water: { enabled: false, rate: { source: 'manual', value: null } }
+  }, [{ id: 'sensor.dynamic_quarter_price', domain: 'sensor', state: '0.247531', unit: 'EUR/kWh', available: true }],
+  { record: async (...sample) => recorded.push(sample) }, 1234);
+  assert.deepEqual(recorded, [['sensor.dynamic_quarter_price', 0.247531, 1234, 15 * 60 * 1000]]);
+});
+
+test('gepland vast tarief gaat in op lokale middernacht en splitst maandkosten correct', () => {
+  const summary = summarizeEnergyCosts({
+    costs: { ...costs,
+      electricity: { enabled: true, contractType: 'fixed', rateMode: 'single', rate: { source: 'manual', value: 0.2,
+        futureRates: [{ effectiveDate: '2026-10-20', value: 0.3 }] } },
+      feedIn: { ...costs.feedIn, enabled: false }, gas: { ...costs.gas, enabled: false }, water: { ...costs.water, enabled: false } },
+    mappings: { electricityLow: 'sensor.import' },
+    statistics: { 'sensor.import': [
+      { start: Date.parse('2026-10-19T20:00:00Z'), end: Date.parse('2026-10-19T21:00:00Z'), change: 2 },
+      { start: Date.parse('2026-10-20T00:00:00Z'), end: Date.parse('2026-10-20T01:00:00Z'), change: 3 }
+    ] },
+    entities: [], now: new Date('2026-10-20T02:00:00Z'), timeZone: 'Europe/Amsterdam'
+  });
+  assert.equal(summary.resources[0].details[0].price, 0.3);
+  assert.equal(Number(summary.resources[0].today.toFixed(2)), 0.9);
+  assert.equal(Number(summary.resources[0].month.toFixed(2)), 1.3);
+});
+
+test('prijsregistratie neemt automatisch de toekomstige vaste prijs over op de ingangsdatum', async () => {
+  const recorded = [];
+  const scheduledCosts = { ...costs, electricity: { enabled: true, rateMode: 'single', contractType: 'fixed', interval: 'day',
+    rate: { source: 'manual', value: 0.2, futureRates: [{ effectiveDate: '2026-10-20', value: 0.3 }] } },
+    feedIn: { enabled: false, rateMode: 'single', rate: { source: 'manual', value: null } },
+    gas: { ...costs.gas, enabled: false }, water: { ...costs.water, enabled: false } };
+  const history = { record: async (...sample) => recorded.push(sample) };
+  await recordEnergyPrices(scheduledCosts, [], history, Date.parse('2026-10-19T21:00:00Z'));
+  await recordEnergyPrices(scheduledCosts, [], history, Date.parse('2026-10-19T22:00:00Z'));
+  assert.deepEqual(recorded.filter(sample => sample[0] === 'rate.electricity_single').map(sample => sample.slice(0, 2)), [
+    ['rate.electricity_single', 0.2], ['rate.electricity_single', 0.3]
+  ]);
+  const futureOnly = { ...scheduledCosts, electricity: { ...scheduledCosts.electricity, rate: { source: 'manual', value: null,
+    futureRates: [{ effectiveDate: '2026-10-20', value: 0.3 }] } } };
+  await recordEnergyPrices(futureOnly, [], history, Date.parse('2026-10-19T22:00:00Z'));
+  assert.deepEqual(recorded.filter(sample => sample[0] === 'rate.electricity_single').at(-1).slice(0, 2), ['rate.electricity_single', 0.3]);
 });

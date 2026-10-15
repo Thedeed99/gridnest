@@ -40,16 +40,16 @@ export async function createPriceHistory(directory) {
     all() {
       return structuredClone(histories);
     },
-    async record(entityId, value, at = Date.now()) {
-      if (!entityIdPattern.test(entityId) || value !== null && !Number.isFinite(value) || !Number.isFinite(at)) return false;
+    async record(entityId, value, at = Date.now(), minimumIntervalMs = sampleIntervalMs) {
+      if (!entityIdPattern.test(entityId) || value !== null && !Number.isFinite(value) || !Number.isFinite(at) || !Number.isFinite(minimumIntervalMs) || minimumIntervalMs <= 0) return false;
       const samples = histories[entityId] ?? (histories[entityId] = []);
       const previous = samples.at(-1);
       if (previous && at <= previous.at) return false;
-      if (previous && Object.is(value, previous.value) && at - previous.at < sampleIntervalMs) return false;
+      if (previous && Object.is(value, previous.value) && at - previous.at < minimumIntervalMs) return false;
       samples.push({ at, value });
       const cutoff = at - retentionMs;
       const firstRetained = samples.findIndex(sample => sample.at >= cutoff);
-      const keepPrevious = firstRetained > 0 && at - samples[firstRetained - 1].at <= sampleIntervalMs;
+      const keepPrevious = firstRetained > 0 && at - samples[firstRetained - 1].at <= minimumIntervalMs;
       const removeCount = firstRetained > 0 ? firstRetained - (keepPrevious ? 1 : 0) : 0;
       if (removeCount) samples.splice(0, removeCount);
       await persist();

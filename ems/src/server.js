@@ -12,7 +12,7 @@ import { createRuleRunner } from './rule-runner.js';
 import { demoUtilityHistory, readUtilityHistory } from './gas.js';
 import { dailyEnergyRecap, demoDailyRecap, recapMeters, readDailyRecap } from './daily-recap.js';
 import { readOfficialEnergy } from './energy-statistics.js';
-import { demoEnergyCosts, readEnergyCosts, recordEnergyPrices, validateEnergyCostPreferences } from './energy-costs.js';
+import { demoEnergyCosts, energyTariffHistory, readEnergyCosts, recordEnergyPrices, validateEnergyCostPreferences } from './energy-costs.js';
 import { createPriceHistory } from './price-history.js';
 import { cumulativeSolarToday, isCumulativeSolarMeter, readSolarMeterToday } from './solar-meter.js';
 
@@ -23,6 +23,7 @@ export function createApp({ store, entitiesProvider, demo = false, supervisor = 
   officialRecapProvider = async () => null,
   solarTodayProvider = async () => null,
   energyCostsProvider = async () => ({ resources: [] }),
+  priceHistory = null,
   batterySwitchProvider = async () => { throw new Error('Accubediening niet beschikbaar.'); },
   consumerSwitchProvider = async () => { throw new Error('Verbruikerbediening niet beschikbaar.'); },
   evCommandProvider = async () => { throw new Error('Laadpaalbediening niet beschikbaar.'); },
@@ -73,6 +74,11 @@ export function createApp({ store, entitiesProvider, demo = false, supervisor = 
     } catch (error) {
       return response.status(503).json({ error: error.message || 'Energiekosten niet beschikbaar.' });
     }
+  });
+  app.get('/api/tariff-history', (_request, response) => {
+    response.setHeader('Cache-Control', 'no-store');
+    const costs = store.get().preferences.costs;
+    return response.json({ retentionDays: 45, rates: energyTariffHistory(costs, priceHistory?.all() ?? {}) });
   });
   app.get('/api/utility-history/:utility', async (request, response) => {
     const { utility } = request.params;
@@ -267,6 +273,7 @@ export function createApp({ store, entitiesProvider, demo = false, supervisor = 
     }
     catch (error) { return response.status(400).json({ error: error.message }); }
     await store.update({ preferences });
+    if (priceHistory) await recordEnergyPrices(preferences.costs, connection.entities ?? [], priceHistory);
     await runner?.tick();
     response.json({ preferences });
   });
@@ -369,7 +376,7 @@ export async function startServer(env = process.env) {
     unitProvider: demo ? async () => '°C' : () => readTemperatureUnit(env),
     activeAllowed: supervisor && controlEnv.CONTROL_ENABLED === 'true' && !demo,
     execute: command => executeRuleCommand(command, controlEnv) });
-  const app = createApp({ store, demo, supervisor, entitiesProvider, runner, utilityHistoryProvider, dailyRecapProvider, officialRecapProvider, solarTodayProvider, energyCostsProvider, batterySwitchProvider, solarLimitProvider, evCommandProvider, consumerSwitchProvider });
+  const app = createApp({ store, demo, supervisor, entitiesProvider, runner, utilityHistoryProvider, dailyRecapProvider, officialRecapProvider, solarTodayProvider, energyCostsProvider, priceHistory, batterySwitchProvider, solarLimitProvider, evCommandProvider, consumerSwitchProvider });
   let priceCapture;
   const capturePrices = async () => {
     if (priceCapture) return priceCapture;
@@ -382,7 +389,9 @@ export async function startServer(env = process.env) {
     try { await priceCapture; }
     finally { priceCapture = null; }
   };
-  const server = app.listen(8080, env.HOST || (supervisor ? '0.0.0.0' : '127.0.0.1'), () => {
+  const port = Number(env.PORT ?? 8080);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT moet een geldig poortnummer zijn.');
+  const server = app.listen(port, env.HOST || (supervisor ? '0.0.0.0' : '127.0.0.1'), () => {
     runner.start();
     void capturePrices();
     const priceTimer = setInterval(() => { void capturePrices(); }, 60_000);
@@ -393,7 +402,7 @@ export async function startServer(env = process.env) {
       await priceHistory.close();
     });
     const mode = demo ? 'demo' : runner.status().activeAllowed ? 'sturing toegestaan' : 'regels standaard uit';
-    console.log(`Gridnest beschikbaar op poort 8080 (${mode}).`);
+    console.log(`Gridnest beschikbaar op poort ${port} (${mode}).`);
   });
   server.once('close', () => runner.stop());
   for (const signal of ['SIGTERM', 'SIGINT']) process.once(signal, () => { runner.stop(); server.close(); });

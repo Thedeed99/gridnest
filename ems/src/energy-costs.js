@@ -2,8 +2,15 @@ import { DateTime } from 'luxon';
 import { readStatisticsConnection } from './energy-statistics.js';
 
 const unitKey = unit => String(unit ?? '').replaceAll('³', '3').replaceAll('€', 'EUR').replaceAll(' ', '').toLowerCase();
-const maxSampleAgeMs = 65 * 60 * 1000;
 const sampleIntervalMs = 55 * 60 * 1000;
+
+function intervalMilliseconds(interval) {
+  return interval === '15min' ? 15 * 60 * 1000 : interval === 'day' ? 23 * 60 * 60 * 1000 : sampleIntervalMs;
+}
+
+function maxSampleAge(interval) {
+  return interval === '15min' ? 20 * 60 * 1000 : interval === 'day' ? 26 * 60 * 60 * 1000 : 65 * 60 * 1000;
+}
 
 function electricityMeters(mappings, direction) {
   const lowId = direction === 'return' ? mappings.electricityReturnLow : mappings.electricityLow;
@@ -28,6 +35,37 @@ export function validateEnergyCostPreferences(preferences, entities) {
   }
 }
 
+function tariffEntries(costs) {
+  const entries = [];
+  const add = (resourceKey, unit, resource, slots) => {
+    for (const [slot, label, rate] of slots) entries.push({
+      key: `rate.${resourceKey}_${slot}`, label, unit, interval: resource.interval ?? 'hour', rate,
+      contractType: resource.contractType ?? (rate?.source === 'entity' ? 'dynamic' : 'fixed'),
+      historyKey: rate?.source === 'entity' && rate.entityId ? rate.entityId : `rate.${resourceKey}_${slot}`
+    });
+  };
+  add('electricity', 'kWh', costs.electricity, costs.electricity.rateMode === 'dual'
+    ? [['low', 'Stroom · laag', costs.electricity.lowRate], ['high', 'Stroom · hoog', costs.electricity.highRate]]
+    : [['single', 'Stroom · all-in', costs.electricity.rate]]);
+  const feedIn = costs.feedIn ?? {};
+  add('feedin', 'kWh', feedIn, feedIn.rateMode === 'dual'
+    ? [['low', 'Teruglevering · laag', feedIn.lowRate], ['high', 'Teruglevering · hoog', feedIn.highRate]]
+    : [['single', 'Terugleververgoeding', feedIn.rate]]);
+  add('gas', 'm³', costs.gas, [['single', 'Gas', costs.gas.rate]]);
+  add('water', 'm³', costs.water, [['single', 'Water', costs.water.rate]]);
+  return entries;
+}
+
+export function energyTariffHistory(costs, histories) {
+  return tariffEntries(costs).map(({ key, label, unit, interval, contractType, rate, historyKey }) => ({
+    key, label, unit, interval, contractType,
+    current: rate?.source === 'entity' ? null : fixedRateAt(rate, Date.now()),
+    futureRates: rate?.futureRates ?? [],
+    entityId: rate?.source === 'entity' ? rate.entityId : null,
+    samples: histories[historyKey] ?? []
+  }));
+}
+
 function activeRates(resource) {
   if (!resource) return [];
   return resource.rateMode === 'dual' ? [resource.lowRate, resource.highRate] : [resource.rate];
@@ -36,12 +74,43 @@ function activeRates(resource) {
 function ratesForMeters(resource, meters) {
   return meters.map(meter => ({ ...meter,
     rate: resource.rateMode === 'dual' ? meter.label === 'Laag' ? resource.lowRate : meter.label === 'Hoog' ? resource.highRate : null : resource.rate,
-    priceUnit: 'EUR/kWh'
+    interval: resource.interval ?? 'hour', priceUnit: 'EUR/kWh'
   }));
 }
 
-function priceFor(rate, unit, entities) {
-  if (rate.source === 'manual') return Number.isFinite(rate.value) ? rate.value : null;
+function fixedRateAt(rate, at, timeZone = 'Europe/Amsterdam') {
+  let value = rate?.value;
+  for (const scheduled of [...(rate?.futureRates ?? [])].sort((a, b) => a.effectiveDate.localeCompare(b.effectiveDate))) {
+    const effectiveAt = DateTime.fromISO(scheduled.effectiveDate, { zone: timeZone }).startOf('day').toMillis();
+    if (at < effectiveAt) break;
+    value = scheduled.value;
+  }
+  return Number.isFinite(value) ? value : null;
+}
+
+function scheduledFixedCost(points, start, end, rate, timeZone) {
+  const changes = points.filter(point => Number.isFinite(point.end) && point.end > start && point.end <= end && Number.isFinite(point.change) && point.change >= 0);
+  if (!changes.length) return null;
+  const transitions = (rate.futureRates ?? []).map(item => DateTime.fromISO(item.effectiveDate, { zone: timeZone }).startOf('day').toMillis()).sort((a, b) => a - b);
+  let total = 0;
+  for (const point of changes) {
+    const intervalStart = Number.isFinite(point.start) ? point.start : point.end - 60 * 60 * 1000;
+    const overlapStart = Math.max(start, intervalStart);
+    const overlapEnd = Math.min(end, point.end);
+    const boundaries = [overlapStart, ...transitions.filter(at => at > overlapStart && at < overlapEnd), overlapEnd];
+    for (let index = 1; index < boundaries.length; index++) {
+      const segmentStart = boundaries[index - 1];
+      const segmentEnd = boundaries[index];
+      const price = fixedRateAt(rate, segmentStart, timeZone);
+      if (price === null) return null;
+      total += point.change * ((segmentEnd - segmentStart) / (point.end - intervalStart)) * price;
+    }
+  }
+  return total;
+}
+
+function priceFor(rate, unit, entities, at, timeZone) {
+  if (rate.source === 'manual') return fixedRateAt(rate, at, timeZone);
   const entity = entities.find(item => item.id === rate.entityId);
   if (!entity?.available || entity.domain !== 'sensor' || unitKey(entity.unit) !== unitKey(unit)) return null;
   const state = String(entity.state ?? '').trim();
@@ -54,7 +123,7 @@ function periodUsage(points, start, end) {
   return changes.length ? changes.reduce((total, point) => total + point.change, 0) : null;
 }
 
-function intervalPrice(samples, start, end) {
+function intervalPrice(samples, start, end, maxSampleAgeMs) {
   let sampleIndex = -1;
   for (let index = 0; index < samples.length && samples[index].at <= start; index++) sampleIndex = index;
   if (sampleIndex < 0) return null;
@@ -72,7 +141,7 @@ function intervalPrice(samples, start, end) {
   return weightedPrice / (end - start);
 }
 
-function historicalCost(points, samples, start, end) {
+function historicalCost(points, samples, start, end, interval) {
   const changes = points.filter(point => Number.isFinite(point.end) && point.end > start && point.end <= end && Number.isFinite(point.change) && point.change >= 0);
   if (!changes.length) return null;
   let total = 0;
@@ -81,7 +150,7 @@ function historicalCost(points, samples, start, end) {
     const intervalStart = Number.isFinite(point.start) ? point.start : intervalEnd - 60 * 60 * 1000;
     const overlapStart = Math.max(start, intervalStart);
     const overlapEnd = Math.min(end, intervalEnd);
-    const price = intervalPrice(samples, overlapStart, overlapEnd);
+    const price = intervalPrice(samples, overlapStart, overlapEnd, maxSampleAge(interval));
     if (price === null) return null;
     total += point.change * ((overlapEnd - overlapStart) / (intervalEnd - intervalStart)) * price;
   }
@@ -89,20 +158,25 @@ function historicalCost(points, samples, start, end) {
 }
 
 export function recordEnergyPrices(costs, entities, priceHistory, now = Date.now()) {
-  const rates = [
-    ...(costs.electricity.enabled ? activeRates(costs.electricity).map(rate => [rate, 'EUR/kWh']) : []),
-    ...(costs.feedIn?.enabled ? activeRates(costs.feedIn).map(rate => [rate, 'EUR/kWh']) : []),
-    ...(costs.gas.enabled ? [[costs.gas.rate, 'EUR/m³']] : []),
-    ...(costs.water.enabled ? [[costs.water.rate, 'EUR/m³']] : [])
-  ].filter(([rate]) => rate.source === 'entity' && rate.entityId);
-  const byId = new Map(rates.map(([rate, unit]) => [rate.entityId, unit]));
-  return Promise.all([...byId].map(([entityId, expectedUnit]) => {
-    const entity = entities.find(item => item.id === entityId);
-    if (!entity?.available || entity.domain !== 'sensor' || unitKey(entity.unit) !== unitKey(expectedUnit)) return priceHistory.record(entityId, null, now);
-    const state = String(entity.state ?? '').trim();
-    const value = state ? Number(state) : Number.NaN;
-    return priceHistory.record(entityId, Number.isFinite(value) ? value : null, now);
-  }));
+  const byId = new Map();
+  for (const entry of tariffEntries(costs)) {
+    const { rate, unit, interval, historyKey } = entry;
+    if (!rate || rate.source === 'entity' && !rate.entityId) continue;
+    let value = rate.source === 'manual' ? fixedRateAt(rate, now) : null;
+    if (rate.source === 'manual' && value === null) continue;
+    if (rate.source === 'entity' && rate.entityId) {
+      const entity = entities.find(item => item.id === rate.entityId);
+      if (entity?.available && entity.domain === 'sensor' && unitKey(entity.unit) === unitKey(`EUR/${unit}`)) {
+        const state = String(entity.state ?? '').trim();
+        const parsed = state ? Number(state) : Number.NaN;
+        value = Number.isFinite(parsed) ? parsed : null;
+      }
+    }
+    const minimumInterval = rate.source === 'manual' ? intervalMilliseconds('day') : intervalMilliseconds(interval);
+    const previous = byId.get(historyKey);
+    byId.set(historyKey, { value, minimumInterval: previous ? Math.min(previous.minimumInterval, minimumInterval) : minimumInterval });
+  }
+  return Promise.all([...byId].map(([historyKey, item]) => priceHistory.record(historyKey, item.value, now, item.minimumInterval)));
 }
 
 export function summarizeEnergyCosts({ costs, mappings, entities, statistics, priceHistory = {}, now = new Date(), timeZone }) {
@@ -127,16 +201,18 @@ export function summarizeEnergyCosts({ costs, mappings, entities, statistics, pr
     resources: resources.filter(resource => resource.enabled).map(resource => {
       const details = resource.meters.filter(meter => meter.id).map(meter => {
         const rate = meter.rate;
-        const price = rate ? priceFor(rate, meter.priceUnit, entities) : null;
+        const price = rate ? priceFor(rate, meter.priceUnit, entities, now.getTime(), timeZone) : null;
         const points = statistics[meter.id] ?? [];
         const todayUsage = meter.id ? periodUsage(points, todayStart, now.getTime()) : null;
         const monthUsage = meter.id ? periodUsage(points, monthStart, now.getTime()) : null;
         const todayCost = !rate ? null : rate.source === 'manual'
-          ? todayUsage === null || price === null ? null : todayUsage * price
-          : historicalCost(points, priceHistory[rate.entityId] ?? [], todayStart, now.getTime());
+          ? rate.futureRates?.length ? scheduledFixedCost(points, todayStart, now.getTime(), rate, timeZone)
+            : todayUsage === null || price === null ? null : todayUsage * price
+          : historicalCost(points, priceHistory[rate.entityId] ?? [], todayStart, now.getTime(), meter.interval);
         const monthCost = !rate ? null : rate.source === 'manual'
-          ? monthUsage === null || price === null ? null : monthUsage * price
-          : historicalCost(points, priceHistory[rate.entityId] ?? [], monthStart, now.getTime());
+          ? rate.futureRates?.length ? scheduledFixedCost(points, monthStart, now.getTime(), rate, timeZone)
+            : monthUsage === null || price === null ? null : monthUsage * price
+          : historicalCost(points, priceHistory[rate.entityId] ?? [], monthStart, now.getTime(), meter.interval);
         return { label: meter.label, rate, price, todayUsage, monthUsage, todayCost, monthCost };
       });
       const total = key => details.length && details.every(detail => detail[key] !== null) ? details.reduce((sum, detail) => sum + detail[key], 0) : null;
@@ -207,19 +283,14 @@ export function demoEnergyCosts(config, entities, now = new Date()) {
     ];
   }
   const priceHistory = {};
-  const rates = [
-    ...(config.preferences.costs.electricity.enabled ? [config.preferences.costs.electricity.rate] : []),
-    ...(config.preferences.costs.electricity.enabled ? activeRates(config.preferences.costs.electricity) : []),
-    ...(config.preferences.costs.feedIn?.enabled ? activeRates(config.preferences.costs.feedIn) : []),
-    ...(config.preferences.costs.gas.enabled ? [config.preferences.costs.gas.rate] : []),
-    ...(config.preferences.costs.water.enabled ? [config.preferences.costs.water.rate] : [])
-  ].filter(rate => rate.source === 'entity' && rate.entityId);
-  for (const rate of rates) {
-    const entity = entities.find(item => item.id === rate.entityId);
+  const rates = tariffEntries(config.preferences.costs).filter(entry => entry.rate?.source === 'entity' && entry.rate.entityId);
+  for (const entry of rates) {
+    const entity = entities.find(item => item.id === entry.rate.entityId);
     const value = Number(entity?.state);
     if (!entity?.available || !Number.isFinite(value)) continue;
-    priceHistory[rate.entityId] = [];
-    for (let at = monthStart - sampleIntervalMs; at <= now.getTime(); at += sampleIntervalMs) priceHistory[rate.entityId].push({ at, value });
+    priceHistory[entry.historyKey] = [];
+    const sampleInterval = intervalMilliseconds(entry.interval);
+    for (let at = monthStart - sampleInterval; at <= now.getTime(); at += sampleInterval) priceHistory[entry.historyKey].push({ at, value });
   }
   return summarizeEnergyCosts({ costs: config.preferences.costs, mappings: config.mappings, entities, statistics, priceHistory, now, timeZone: 'Europe/Amsterdam' });
 }

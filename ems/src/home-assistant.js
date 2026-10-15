@@ -60,11 +60,54 @@ const stateSchema = z.object({
   , last_reported: z.string().datetime({ offset: true }).optional(), last_changed: z.string().datetime({ offset: true }).optional()
 });
 
+function priceForecast(attributes, unit) {
+  const normalizedUnit = String(unit ?? '').replaceAll('³', '3').replaceAll('€', 'eur').replaceAll(' ', '').toLowerCase();
+  if (!['eur/kwh', 'eur/m3'].includes(normalizedUnit)) return [];
+  const now = new Date();
+  const today = new Date(now); today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
+  const intervalValue = attributes.price_interval ?? attributes.forecast_interval ?? attributes.interval;
+  const intervalText = String(intervalValue ?? '').toLowerCase();
+  const intervalMinutes = Number.isFinite(Number(intervalValue)) && Number(intervalValue) > 0 ? Number(intervalValue)
+    : intervalText.includes('15') || intervalText.includes('quarter') ? 15
+      : intervalText.includes('30') ? 30 : 60;
+  const intervalMs = intervalMinutes * 60 * 1000;
+  const points = [];
+  const append = (source, fallbackAt) => {
+    const items = Array.isArray(source) ? source : Array.isArray(source?.prices) ? source.prices : [];
+    const stepMs = !intervalValue && items.length >= 80 ? 15 * 60 * 1000 : !intervalValue && items.length >= 40 ? 30 * 60 * 1000 : intervalMs;
+    for (const [index, item] of items.entries()) {
+      let rawAt;
+      let rawValue;
+      if (Array.isArray(item)) [rawAt, rawValue] = item;
+      else if (item && typeof item === 'object') {
+        rawAt = item.start ?? item.at ?? item.timestamp ?? item.time ?? item.datetime ?? item.date;
+        rawValue = item.value ?? item.price ?? item.total;
+      } else rawValue = item;
+      const parsedAt = typeof rawAt === 'number' ? rawAt < 1e12 ? rawAt * 1000 : rawAt : typeof rawAt === 'string' ? Date.parse(rawAt) : Number.NaN;
+      const at = Number.isFinite(parsedAt) ? parsedAt : fallbackAt === null ? Number.NaN : fallbackAt + index * stepMs;
+      const value = typeof rawValue === 'number' ? rawValue : typeof rawValue === 'string' ? Number(rawValue) : Number.NaN;
+      if (Number.isFinite(at) && Number.isFinite(value)) points.push({ at, value });
+    }
+  };
+  append(attributes.forecast, now.getTime() + intervalMs);
+  append(attributes.price_forecast, now.getTime() + intervalMs);
+  append(attributes.prices, now.getTime() + intervalMs);
+  append(attributes.raw_today, today.getTime());
+  append(attributes.today, today.getTime());
+  append(attributes.raw_tomorrow, tomorrow.getTime());
+  append(attributes.tomorrow, tomorrow.getTime());
+  return [...new Map(points.map(point => [point.at, point])).values()].sort((a, b) => a.at - b.at);
+}
+
 export function normalizeStates(states) {
-  return z.array(stateSchema).parse(states).filter(state => ['sensor', 'binary_sensor', 'climate', 'number', 'switch', 'lock', 'person', 'device_tracker'].includes(state.entity_id.split('.')[0])).map(state => ({
+  return z.array(stateSchema).parse(states).filter(state => ['sensor', 'binary_sensor', 'climate', 'number', 'switch', 'lock', 'person', 'device_tracker'].includes(state.entity_id.split('.')[0])).map(state => {
+    const unit = typeof state.attributes.unit_of_measurement === 'string' ? state.attributes.unit_of_measurement : '';
+    const forecast = priceForecast(state.attributes, unit);
+    return {
     id: state.entity_id, name: typeof state.attributes.friendly_name === 'string' ? state.attributes.friendly_name : state.entity_id,
     domain: state.entity_id.split('.')[0], state: state.state,
-    unit: typeof state.attributes.unit_of_measurement === 'string' ? state.attributes.unit_of_measurement : '',
+    unit,
     deviceClass: typeof state.attributes.device_class === 'string' ? state.attributes.device_class : '',
     stateClass: typeof state.attributes.state_class === 'string' ? state.attributes.state_class : '',
     updatedAt: state.last_updated,
@@ -80,8 +123,10 @@ export function normalizeStates(states) {
     available: !['unavailable', 'unknown'].includes(state.state),
     hvacAction: ['heating', 'cooling', 'idle', 'off', 'defrosting', 'drying', 'fan'].includes(state.attributes.hvac_action) ? state.attributes.hvac_action : null,
     targetTemperature: typeof state.attributes.temperature === 'number' ? state.attributes.temperature : null,
-    currentTemperature: typeof state.attributes.current_temperature === 'number' ? state.attributes.current_temperature : null
-  }));
+    currentTemperature: typeof state.attributes.current_temperature === 'number' ? state.attributes.current_temperature : null,
+    ...(forecast.length ? { priceForecast: forecast } : {})
+  };
+  });
 }
 
 export function compatible(role, entity) {
