@@ -244,6 +244,33 @@ test('tariefvoorkeuren accepteren geldige sensoreenheden en weigeren een verkeer
   assert.equal(store.get().preferences.costs.gas.rate.entityId, 'sensor.demo_price_gas');
 });
 
+test('financiële tarieven bewaren zes decimalen na opslaan en herstart', async context => {
+  const { url, store, directory } = await fixture(context);
+  const costs = { ...defaultPreferences.costs,
+    electricity: { enabled: true, rate: { source: 'manual', value: 0.234567, entityId: null } },
+    feedIn: { enabled: true, rate: { source: 'manual', value: 0.123456, entityId: null } } };
+  const saved = await fetch(`${url}/api/preferences`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...defaultPreferences, costs }) });
+  assert.equal(saved.status, 200);
+  assert.deepEqual(store.get().preferences.costs, costs);
+  const restored = await createStore(directory, 'demo');
+  assert.deepEqual(restored.get().preferences.costs, costs);
+  const invalid = { ...costs, feedIn: { enabled: true, rate: { source: 'entity', entityId: 'sensor.demo_temperature' } } };
+  assert.equal((await fetch(`${url}/api/preferences`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...defaultPreferences, costs: invalid }) })).status, 400);
+});
+
+test('bestaande laag/hoog-instellingen migreren naar één ingevuld all-in tarief', async context => {
+  const { store, directory } = await fixture(context);
+  const config = store.get();
+  config.preferences.costs.electricity = { enabled: true,
+    lowRate: { source: 'manual', value: 0.234567, entityId: null },
+    highRate: { source: 'manual', value: 0.345678, entityId: null } };
+  delete config.preferences.costs.feedIn;
+  await writeFile(join(directory, 'settings.json'), JSON.stringify(config));
+  const restored = await createStore(directory, 'demo');
+  assert.deepEqual(restored.get().preferences.costs.electricity, { enabled: true, rate: config.preferences.costs.electricity.lowRate });
+  assert.equal(restored.get().preferences.costs.feedIn.enabled, false);
+});
+
 test('dagrecap-API retourneert de meters voor het overzicht', async context => {
   const { url, store } = await fixture(context, { dailyRecapProvider: async mappings => ({
     available: true, complete: true, rows: [{ label: mappings.knownConsumerNames['sensor.demo_ev_power'], energyKwh: 4.2 }]

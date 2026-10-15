@@ -40,6 +40,8 @@ export function demoEntities() {
     sensor('sensor.demo_battery_soc', 'Thuisbatterij · Laadtoestand', 68, '%', 'battery'),
     sensor('sensor.demo_battery_health', 'Thuisbatterij · Accuhealth', 96, '%', 'battery'),
     sensor('sensor.demo_energy', 'Slimme meter · Dagverbruik', 8.4, 'kWh', 'energy'),
+    { ...sensor('sensor.demo_electricity_total', 'Slimme meter · Totale netafname', 2110, 'kWh', 'energy'), attributes: { friendly_name: 'Slimme meter · Totale netafname', unit_of_measurement: 'kWh', device_class: 'energy', state_class: 'total_increasing' } },
+    { ...sensor('sensor.demo_electricity_return', 'Slimme meter · Totale teruglevering', 750, 'kWh', 'energy'), attributes: { friendly_name: 'Slimme meter · Totale teruglevering', unit_of_measurement: 'kWh', device_class: 'energy', state_class: 'total_increasing' } },
     { ...sensor('sensor.demo_electricity_low', 'Slimme meter · Laag tarief', 1250, 'kWh', 'energy'), attributes: { friendly_name: 'Slimme meter · Laag tarief', unit_of_measurement: 'kWh', device_class: 'energy', state_class: 'total_increasing' } },
     { ...sensor('sensor.demo_electricity_high', 'Slimme meter · Hoog tarief', 860, 'kWh', 'energy'), attributes: { friendly_name: 'Slimme meter · Hoog tarief', unit_of_measurement: 'kWh', device_class: 'energy', state_class: 'total_increasing' } },
     sensor('sensor.demo_price_low', 'Energietarief · Laag', 0.24, 'EUR/kWh', 'monetary'),

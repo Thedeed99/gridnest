@@ -18,7 +18,11 @@ const costRateSchema = z.object({
 }).strict().default({});
 
 const energyCostsSchema = z.object({
-  electricity: z.object({ enabled: z.boolean().default(false), lowRate: costRateSchema, highRate: costRateSchema }).strict().default({}),
+  electricity: z.object({ enabled: z.boolean().default(false), rate: costRateSchema.optional(), lowRate: costRateSchema.optional(), highRate: costRateSchema.optional() }).strict().default({}).transform(value => ({
+    enabled: value.enabled,
+    rate: value.rate ?? [value.lowRate, value.highRate].find(rate => rate && (rate.value !== null || rate.entityId)) ?? costRateSchema.parse({})
+  })),
+  feedIn: z.object({ enabled: z.boolean().default(false), rate: costRateSchema }).strict().default({}),
   gas: z.object({ enabled: z.boolean().default(false), rate: costRateSchema }).strict().default({}),
   water: z.object({ enabled: z.boolean().default(false), rate: costRateSchema }).strict().default({})
 }).strict().default({});

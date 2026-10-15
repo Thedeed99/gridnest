@@ -3,12 +3,12 @@ import assert from 'node:assert/strict';
 import { readEnergyCosts, recordEnergyPrices, summarizeEnergyCosts, validateEnergyCostPreferences } from '../src/energy-costs.js';
 
 const costs = {
-  electricity: { enabled: true, lowRate: { source: 'manual', value: 0.2, entityId: null }, highRate: { source: 'entity', value: null, entityId: 'sensor.high_rate' } },
+  electricity: { enabled: true, rate: { source: 'manual', value: 0.2, entityId: null } },
   gas: { enabled: true, rate: { source: 'manual', value: 1.25, entityId: null } },
   water: { enabled: true, rate: { source: 'entity', value: null, entityId: 'sensor.water_rate' } }
 };
 
-test('kosten groeperen laag/hoog, gas en water voor vandaag en deze maand', () => {
+test('één all-in tarief geldt voor laag/hoog naast gas en water voor vandaag en deze maand', () => {
   const now = new Date('2026-10-15T12:00:00Z');
   const summary = summarizeEnergyCosts({
     costs,
@@ -37,16 +37,16 @@ test('kosten groeperen laag/hoog, gas en water voor vandaag en deze maand', () =
     timeZone: 'Europe/Amsterdam'
   });
   assert.deepEqual(summary.resources.map(resource => [resource.key, Number(resource.today.toFixed(2)), Number(resource.month.toFixed(2))]), [
-    ['electricity', 1.3, 4.8], ['gas', 0.63, 5.63], ['water', 0.3, 3.3]
+    ['electricity', 1, 4], ['gas', 0.63, 5.63], ['water', 0.3, 3.3]
   ]);
-  assert.deepEqual(summary.resources.map(resource => Number(resource.days30.toFixed(2))), [4.8, 5.63, 3.3]);
-  assert.equal(summary.resources[0].details[1].todayCost, 0.8999999999999999);
+  assert.equal(summary.resources[0].days30, undefined);
+  assert.equal(summary.resources[0].details[1].todayCost, 0.6000000000000001);
 });
 
 test('dynamische prijs wordt per uur tijdgewogen en ontbrekende prijshistorie blijft onvolledig', () => {
   const now = new Date('2026-10-15T12:00:00Z');
   const options = {
-    costs: { ...costs, electricity: { ...costs.electricity, lowRate: { source: 'entity', value: null, entityId: 'sensor.high_rate' }, highRate: { source: 'manual', value: null, entityId: null } }, gas: { ...costs.gas, enabled: false }, water: { ...costs.water, enabled: false } },
+    costs: { ...costs, electricity: { ...costs.electricity, rate: { source: 'entity', value: null, entityId: 'sensor.high_rate' } }, gas: { ...costs.gas, enabled: false }, water: { ...costs.water, enabled: false } },
     mappings: { electricityLow: 'sensor.low_kwh', electricityHigh: null, gasConsumption: null, waterConsumption: null },
     entities: [{ id: 'sensor.high_rate', domain: 'sensor', state: '-0.02', unit: 'EUR/kWh', available: true }],
     statistics: { 'sensor.low_kwh': [{ start: Date.parse('2026-10-15T10:00:00Z'), end: Date.parse('2026-10-15T11:00:00Z'), change: 2 }] },
@@ -64,7 +64,7 @@ test('dynamische prijs wordt per uur tijdgewogen en ontbrekende prijshistorie bl
 test('prijsopname volgt alleen actieve sensoren en bewaart negatieve of onbeschikbare tarieven', async () => {
   const recorded = [];
   const priceHistory = { record: async (...sample) => recorded.push(sample) };
-  await recordEnergyPrices(costs, [
+  await recordEnergyPrices({ ...costs, electricity: { ...costs.electricity, rate: { source: 'entity', value: null, entityId: 'sensor.high_rate' } } }, [
     { id: 'sensor.high_rate', domain: 'sensor', state: '-0.04', unit: '€/kWh', available: true },
     { id: 'sensor.water_rate', domain: 'sensor', state: 'unknown', unit: 'EUR/m³', available: false }
   ], priceHistory, 1234);
@@ -73,7 +73,7 @@ test('prijsopname volgt alleen actieve sensoren en bewaart negatieve of onbeschi
 
 test('kosten blijven verborgen als de bron uit staat en missen geen tarief stilzwijgend', () => {
   const summary = summarizeEnergyCosts({
-    costs: { ...costs, electricity: { ...costs.electricity, lowRate: { source: 'entity', value: null, entityId: 'sensor.missing_rate' } }, water: { ...costs.water, enabled: false } },
+    costs: { ...costs, electricity: { ...costs.electricity, rate: { source: 'entity', value: null, entityId: 'sensor.missing_rate' } }, water: { ...costs.water, enabled: false } },
     mappings: { electricityLow: 'sensor.low_kwh', electricityHigh: null, gasConsumption: null, waterConsumption: null },
     entities: [], statistics: { 'sensor.low_kwh': [{ end: Date.parse('2026-10-15T11:00:00Z'), change: 2 }] },
     now: new Date('2026-10-15T12:00:00Z'), timeZone: 'Europe/Amsterdam'
@@ -84,7 +84,7 @@ test('kosten blijven verborgen als de bron uit staat en missen geen tarief stilz
 });
 
 test('prijssensoren moeten de juiste euro-eenheid hebben', () => {
-  const preferences = { costs };
+  const preferences = { costs: { ...costs, electricity: { ...costs.electricity, rate: { source: 'entity', value: null, entityId: 'sensor.high_rate' } } } };
   assert.doesNotThrow(() => validateEnergyCostPreferences(preferences, [
     { id: 'sensor.high_rate', domain: 'sensor', unit: '€/kWh' },
     { id: 'sensor.water_rate', domain: 'sensor', unit: 'EUR/m³' }
@@ -100,7 +100,7 @@ test('Home Assistant levert alleen statistieken van ingeschakelde gekoppelde met
   const config = {
     mappings: { electricityLow: 'sensor.low', electricityHigh: null, gasConsumption: 'sensor.gas', waterConsumption: null },
     preferences: { costs: {
-      electricity: { enabled: true, lowRate: { source: 'manual', value: 0.2 }, highRate: { source: 'manual', value: 0.3 } },
+      electricity: { enabled: true, rate: { source: 'manual', value: 0.2 } },
       gas: { enabled: true, rate: { source: 'manual', value: 1.25 } },
       water: { enabled: false, rate: { source: 'manual', value: 1.5 } }
     } }
@@ -128,6 +128,46 @@ test('Home Assistant levert alleen statistieken van ingeschakelde gekoppelde met
   }
   const result = await readEnergyCosts({ SUPERVISOR_TOKEN: 'test-token' }, config, [], now, FakeSocket);
   assert.deepEqual(requestedIds, ['sensor.low', 'sensor.gas']);
-  assert.equal(Date.parse(requestedStartTime), now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  assert.equal(requestedStartTime, '2026-09-30T22:00:00.000Z');
   assert.deepEqual(result.resources.map(resource => [resource.key, resource.today]), [['electricity', 0.4], ['gas', 0.625]]);
+});
+
+test('zes decimalen blijven behouden en een totaalmeter voorkomt dubbele telling van laag/hoog', () => {
+  const summary = summarizeEnergyCosts({
+    costs: { ...costs, electricity: { enabled: true, rate: { source: 'manual', value: 0.234567 } },
+      gas: { ...costs.gas, enabled: false }, water: { ...costs.water, enabled: false },
+      feedIn: { enabled: true, rate: { source: 'manual', value: 0.123456 } } },
+    mappings: { electricityConsumption: 'sensor.import', electricityLow: 'sensor.low', electricityHigh: 'sensor.high', electricityReturn: 'sensor.export' },
+    statistics: Object.fromEntries([['sensor.import', 10], ['sensor.low', 4], ['sensor.high', 6], ['sensor.export', 3]].map(([id, change]) => [id, [{ end: Date.parse('2026-10-15T11:00:00Z'), change }]])),
+    entities: [], now: new Date('2026-10-15T12:00:00Z'), timeZone: 'Europe/Amsterdam'
+  });
+  assert.equal(summary.resources[0].today, 10 * 0.234567);
+  assert.equal(summary.resources[0].details.length, 1);
+  assert.equal(summary.resources[1].today, 3 * 0.123456);
+  assert.equal(summary.resources[1].month, 3 * 0.123456);
+  assert.equal(summary.resources[1].status, null);
+});
+
+test('ontbrekende maandprijzen verbergen een bekende dagopbrengst niet', () => {
+  const options = {
+    costs: { ...costs, electricity: { ...costs.electricity, enabled: false }, gas: { ...costs.gas, enabled: false }, water: { ...costs.water, enabled: false },
+      feedIn: { enabled: true, rate: { source: 'entity', entityId: 'sensor.price' } } },
+    mappings: { electricityReturn: 'sensor.export' },
+    entities: [{ id: 'sensor.price', domain: 'sensor', state: '0.123456', unit: 'EUR/kWh', available: true }],
+    statistics: { 'sensor.export': [
+      { end: Date.parse('2026-10-02T11:00:00Z'), change: 5 },
+      { end: Date.parse('2026-10-15T11:00:00Z'), change: 2 }
+    ] },
+    priceHistory: { 'sensor.price': [{ at: Date.parse('2026-10-15T10:00:00Z'), value: 0.123456 }] },
+    now: new Date('2026-10-15T12:00:00Z'), timeZone: 'Europe/Amsterdam'
+  };
+  const resource = summarizeEnergyCosts(options).resources[0];
+  assert.equal(resource.today, 2 * 0.123456);
+  assert.equal(resource.month, null);
+  assert.match(resource.status, /historie/);
+  const missing = summarizeEnergyCosts({ ...options, mappings: {} }).resources[0];
+  assert.match(missing.status, /Koppel een kWh-meter/);
+  assert.equal(missing.today, null);
+  const zero = summarizeEnergyCosts({ ...options, statistics: { 'sensor.export': [{ end: Date.parse('2026-10-15T11:00:00Z'), change: 0 }] } }).resources[0];
+  assert.equal(zero.today, 0);
 });
