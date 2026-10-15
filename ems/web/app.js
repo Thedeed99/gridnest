@@ -296,12 +296,14 @@ function renderEnergyCosts(container, summary) {
   const complete = resources.length > 0 && resources.every(resource => resource.status === null);
   const today = complete ? resources.reduce((total, resource) => total + resource.today, 0) : null;
   const month = complete ? resources.reduce((total, resource) => total + resource.month, 0) : null;
+  const days30 = complete ? resources.reduce((total, resource) => total + resource.days30, 0) : null;
   container.querySelector('[data-cost-today]').textContent = complete ? currency(today) : 'Onvolledig';
   container.querySelector('[data-cost-month]').textContent = complete ? currency(month) : 'Onvolledig';
+  container.querySelector('[data-cost-days30]').textContent = complete ? currency(days30) : 'Onvolledig';
   const content = container.querySelector('.energy-costs-content');
   content.replaceChildren();
   const headings = element('div', 'energy-cost-row energy-cost-headings');
-  headings.append(element('span', '', 'Verbruik'), element('span', '', 'Vandaag'), element('span', '', 'Deze maand'));
+  headings.append(element('span', '', 'Verbruik'), element('span', '', 'Vandaag'), element('span', '', 'Deze maand'), element('span', '', '30 dagen'));
   content.append(headings);
   for (const resource of summary.resources) {
     const row = element('div', 'energy-cost-row');
@@ -311,7 +313,7 @@ function renderEnergyCosts(container, summary) {
       status.title = resource.details.map(detail => `${detail.label}: ${detail.price === null ? 'tarief ontbreekt' : currency(detail.price)}`).join(' · ');
       row.append(status);
     } else {
-      row.append(element('span', '', currency(resource.today)), element('span', '', currency(resource.month)));
+      row.append(element('span', '', currency(resource.today)), element('span', '', currency(resource.month)), element('span', '', currency(resource.days30)));
     }
     content.append(row);
     if (resource.key === 'electricity' && resource.details.length) {
@@ -319,7 +321,7 @@ function renderEnergyCosts(container, summary) {
       breakdown.append(element('summary', '', 'Laag/hoog uitsplitsing'));
       for (const detail of resource.details) {
         const detailRow = element('div', 'energy-cost-detail');
-        detailRow.append(element('span', '', detail.label), element('span', '', currency(detail.todayCost)), element('span', '', currency(detail.monthCost)));
+        detailRow.append(element('span', '', detail.label), element('span', '', currency(detail.todayCost)), element('span', '', currency(detail.monthCost)), element('span', '', currency(detail.days30Cost)));
         breakdown.append(detailRow);
       }
       content.append(breakdown);
@@ -331,10 +333,10 @@ function energyCostsPanel() {
   const panel = element('details', 'energy-costs-panel');
   const summary = element('summary', 'energy-costs-summary');
   summary.append(element('strong', 'energy-costs-summary-title', 'Kosten'));
-  for (const [key, title] of [['today', 'Vandaag'], ['month', 'Deze maand']]) {
+  for (const [key, title] of [['today', 'Vandaag'], ['month', 'Deze maand'], ['days30', '30 dagen']]) {
     const amount = element('span', 'energy-costs-summary-amount');
     amount.append(element('small', '', title), element('strong', '', 'Laden…'));
-    amount.lastElementChild.dataset[`cost${key === 'today' ? 'Today' : 'Month'}`] = '';
+    amount.lastElementChild.dataset[`cost${key === 'today' ? 'Today' : key === 'month' ? 'Month' : 'Days30'}`] = '';
     summary.append(amount);
   }
   const disclosure = element('span', 'energy-cost-chevron');

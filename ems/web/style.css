@@ -148,8 +148,8 @@ footer { display: flex; justify-content: space-between; gap: 12px; font-size: 10
 
 .page-heading { display: flex; justify-content: space-between; align-items: center; gap: 20px; }
 .overview-page-heading { align-items: flex-start; }
-.energy-costs-panel { width: min(390px, 52%); flex: 0 1 390px; min-width: 0; }
-.energy-costs-summary { display: grid; grid-template-columns: auto repeat(2, minmax(72px, 1fr)) 18px; align-items: center; gap: 12px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); cursor: pointer; list-style: none; }
+.energy-costs-panel { width: min(480px, 58%); flex: 0 1 480px; min-width: 0; }
+.energy-costs-summary { display: grid; grid-template-columns: auto repeat(3, minmax(58px, 1fr)) 18px; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); cursor: pointer; list-style: none; }
 .energy-costs-summary::-webkit-details-marker { display: none; }
 .energy-costs-summary-title { font-size: 12px; }
 .energy-costs-summary-amount { display: flex; flex-direction: column; gap: 2px; text-align: right; }
@@ -159,14 +159,14 @@ footer { display: flex; justify-content: space-between; gap: 12px; font-size: 10
 .energy-cost-chevron svg { width: 16px; height: 16px; transition: transform 150ms ease; }
 .energy-costs-panel[open] .energy-cost-chevron svg { transform: rotate(180deg); }
 .energy-costs-content { margin-top: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
-.energy-cost-row { display: grid; grid-template-columns: minmax(70px, 1fr) minmax(62px, auto) minmax(76px, auto); align-items: center; gap: 12px; padding: 5px 0; font-size: 11px; }
+.energy-cost-row { display: grid; grid-template-columns: minmax(60px, 1fr) repeat(3, minmax(54px, auto)); align-items: center; gap: 8px; padding: 5px 0; font-size: 10px; }
 .energy-cost-row > :nth-child(n + 2) { text-align: right; font-variant-numeric: tabular-nums; }
 .energy-cost-row strong { font-size: 11px; }
 .energy-cost-headings { border-bottom: 1px solid var(--line); color: var(--muted); font-size: 9px; }
 .energy-cost-status { grid-column: 2 / -1; color: var(--muted); text-align: right; }
 .energy-cost-breakdown { border-top: 1px solid var(--line); padding-top: 6px; margin-top: 4px; font-size: 10px; }
 .energy-cost-breakdown summary { color: var(--muted); cursor: pointer; }
-.energy-cost-detail { display: grid; grid-template-columns: minmax(70px, 1fr) minmax(62px, auto) minmax(76px, auto); gap: 12px; padding: 4px 0 0; }
+.energy-cost-detail { display: grid; grid-template-columns: minmax(60px, 1fr) repeat(3, minmax(54px, auto)); gap: 8px; padding: 4px 0 0; }
 .energy-cost-detail > :nth-child(n + 2) { text-align: right; font-variant-numeric: tabular-nums; }
 .energy-cost-option { border-top: 1px solid var(--line); padding: 14px 0 4px; }
 .energy-cost-option > .checkbox-field { padding: 2px 0 8px; }
