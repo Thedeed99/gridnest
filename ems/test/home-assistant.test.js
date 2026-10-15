@@ -176,3 +176,16 @@ test('meerdere batterijen worden gevalideerd op soc- en vermogenssensor', () => 
     batteries: [{ id: 'b1', name: 'Accu 1', socEntity: 'sensor.bat1_soc', powerEntity: 'sensor.bat1_temp', showOnOverview: true }]
   }, entities), /vermogenssensor/i);
 });
+
+test('laag- en hoogtarief accepteren alleen verschillende cumulatieve kWh-meters', () => {
+  const entities = normalizeStates([
+    state('sensor.low_total', 'kWh', '124', { state_class: 'total_increasing' }),
+    state('sensor.high_total', 'kWh', '85', { state_class: 'total' }),
+    state('sensor.session', 'kWh', '2.1', { state_class: 'measurement' })
+  ]);
+  const mappings = validateMappings({ ...emptyMappings, electricityLow: 'sensor.low_total', electricityHigh: 'sensor.high_total' }, entities);
+  assert.equal(mappings.electricityLow, 'sensor.low_total');
+  assert.equal(mappings.electricityHigh, 'sensor.high_total');
+  assert.throws(() => validateMappings({ ...emptyMappings, electricityLow: 'sensor.session' }, entities), /cumulatieve/);
+  assert.throws(() => validateMappings({ ...emptyMappings, electricityLow: 'sensor.low_total', electricityHigh: 'sensor.low_total' }, entities), /afzonderlijke/);
+});

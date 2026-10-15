@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.11 - 2026-10-15
+
+- Voeg een optioneel kostenoverzicht voor stroom, gas en water toe met handmatige tarieven of prijsentiteiten.
+- Toon stroomkosten apart voor laag en hoog tarief; bied vandaag- en maandtotalen op het overzicht.
+
 ## 1.0.10 - 2026-10-14
 
 - Houd het navigatiemenu zichtbaar tijdens scrollen op desktop; behoud het uitschuifmenu op mobiel.

@@ -12,6 +12,7 @@ import { createRuleRunner } from './rule-runner.js';
 import { demoUtilityHistory, readUtilityHistory } from './gas.js';
 import { dailyEnergyRecap, demoDailyRecap, recapMeters, readDailyRecap } from './daily-recap.js';
 import { readOfficialEnergy } from './energy-statistics.js';
+import { demoEnergyCosts, readEnergyCosts, validateEnergyCostPreferences } from './energy-costs.js';
 import { cumulativeSolarToday, isCumulativeSolarMeter, readSolarMeterToday } from './solar-meter.js';
 
 export function createApp({ store, entitiesProvider, demo = false, supervisor = false, runner = null,
@@ -20,6 +21,7 @@ export function createApp({ store, entitiesProvider, demo = false, supervisor = 
   dailyRecapProvider = async () => ({ available: false, complete: false, rows: [] }),
   officialRecapProvider = async () => null,
   solarTodayProvider = async () => null,
+  energyCostsProvider = async () => ({ resources: [] }),
   batterySwitchProvider = async () => { throw new Error('Accubediening niet beschikbaar.'); },
   consumerSwitchProvider = async () => { throw new Error('Verbruikerbediening niet beschikbaar.'); },
   evCommandProvider = async () => { throw new Error('Laadpaalbediening niet beschikbaar.'); },
@@ -59,6 +61,17 @@ export function createApp({ store, entitiesProvider, demo = false, supervisor = 
       householdPresence: householdPresence(config.preferences, connection.entities),
       energy: energySummary(config.mappings, connection.entities),
       readings: readings(config.mappings, connection.entities), fetchedAt: new Date().toISOString() });
+  });
+  app.get('/api/energy-costs', async (_request, response) => {
+    const config = store.get();
+    if (!Object.values(config.preferences.costs).some(item => item.enabled)) return response.json({ resources: [] });
+    try {
+      const connection = await entitiesProvider();
+      response.setHeader('Cache-Control', 'no-store');
+      return response.json(await energyCostsProvider(config, connection.entities ?? []));
+    } catch (error) {
+      return response.status(503).json({ error: error.message || 'Energiekosten niet beschikbaar.' });
+    }
   });
   app.get('/api/utility-history/:utility', async (request, response) => {
     const { utility } = request.params;
@@ -247,7 +260,10 @@ export function createApp({ store, entitiesProvider, demo = false, supervisor = 
   app.put('/api/preferences', async (request, response) => {
     const preferences = preferencesSchema.parse(request.body);
     const connection = await entitiesProvider();
-    try { validatePresencePreferences(preferences, connection.entities); }
+    try {
+      validatePresencePreferences(preferences, connection.entities);
+      validateEnergyCostPreferences(preferences, connection.entities);
+    }
     catch (error) { return response.status(400).json({ error: error.message }); }
     await store.update({ preferences });
     await runner?.tick();
@@ -332,6 +348,9 @@ export async function startServer(env = process.env) {
     : async mappings => readDailyRecap(env, recapMeters(mappings, (await entitiesProvider()).entities));
   const batterySwitchProvider = (entityId, enabled) => executeRuleCommand({ entityId, service: `switch.turn_${enabled ? 'on' : 'off'}` }, controlEnv);
   const officialRecapProvider = demo ? async () => null : mappings => readOfficialEnergy(env, mappings);
+  const energyCostsProvider = demo
+    ? (config, entities) => demoEnergyCosts(config, entities)
+    : (config, entities) => readEnergyCosts(env, config, entities);
   const solarTodayProvider = async (entityId, mode) => {
     const now = new Date();
     const entity = (await entitiesProvider()).entities.find(item => item.id === entityId);
@@ -347,7 +366,7 @@ export async function startServer(env = process.env) {
     unitProvider: demo ? async () => '°C' : () => readTemperatureUnit(env),
     activeAllowed: supervisor && controlEnv.CONTROL_ENABLED === 'true' && !demo,
     execute: command => executeRuleCommand(command, controlEnv) });
-  const app = createApp({ store, demo, supervisor, entitiesProvider, runner, utilityHistoryProvider, dailyRecapProvider, officialRecapProvider, solarTodayProvider, batterySwitchProvider, solarLimitProvider, evCommandProvider, consumerSwitchProvider });
+  const app = createApp({ store, demo, supervisor, entitiesProvider, runner, utilityHistoryProvider, dailyRecapProvider, officialRecapProvider, solarTodayProvider, energyCostsProvider, batterySwitchProvider, solarLimitProvider, evCommandProvider, consumerSwitchProvider });
   const server = app.listen(8080, env.HOST || (supervisor ? '0.0.0.0' : '127.0.0.1'), () => {
     runner.start();
     const mode = demo ? 'demo' : runner.status().activeAllowed ? 'sturing toegestaan' : 'regels standaard uit';
