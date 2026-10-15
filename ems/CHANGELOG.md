@@ -1,6 +1,6 @@
 # Changelog
 
-## Nog niet uitgebracht
+## 1.0.13 - 2026-10-15
 
 - Hernoem Kosten naar Financieel met vandaag en deze maand, terugleveropbrengsten en saldo kosten.
 - Vereenvoudig stroom naar één all-in kWh-tarief en ondersteun handmatige prijzen tot zes decimalen.
