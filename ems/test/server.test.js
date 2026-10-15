@@ -251,14 +251,36 @@ test('financiële tarieven bewaren zes decimalen na opslaan en herstart', async 
     feedIn: { enabled: true, rate: { source: 'manual', value: 0.123456, entityId: null } } };
   const saved = await fetch(`${url}/api/preferences`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...defaultPreferences, costs }) });
   assert.equal(saved.status, 200);
-  assert.deepEqual(store.get().preferences.costs, costs);
+  assert.equal(store.get().preferences.costs.electricity.rateMode, 'single');
+  assert.equal(store.get().preferences.costs.electricity.rate.value, 0.234567);
+  assert.equal(store.get().preferences.costs.feedIn.rateMode, 'single');
+  assert.equal(store.get().preferences.costs.feedIn.rate.value, 0.123456);
   const restored = await createStore(directory, 'demo');
-  assert.deepEqual(restored.get().preferences.costs, costs);
+  assert.deepEqual(restored.get().preferences.costs, store.get().preferences.costs);
   const invalid = { ...costs, feedIn: { enabled: true, rate: { source: 'entity', entityId: 'sensor.demo_temperature' } } };
   assert.equal((await fetch(`${url}/api/preferences`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...defaultPreferences, costs: invalid }) })).status, 400);
 });
 
-test('bestaande laag/hoog-instellingen migreren naar één ingevuld all-in tarief', async context => {
+test('verbruik en teruglevering bewaren onafhankelijk een of twee tarieven', async context => {
+  const { url, store, directory } = await fixture(context);
+  const costs = { ...defaultPreferences.costs,
+    electricity: { enabled: true, rateMode: 'dual',
+      lowRate: { source: 'manual', value: 0.2, entityId: null }, highRate: { source: 'manual', value: 0.4, entityId: null } },
+    feedIn: { enabled: true, rateMode: 'dual',
+      lowRate: { source: 'manual', value: 0.05, entityId: null }, highRate: { source: 'manual', value: 0.1, entityId: null } } };
+  const saved = await fetch(`${url}/api/preferences`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...defaultPreferences, costs }) });
+  assert.equal(saved.status, 200);
+  assert.equal(store.get().preferences.costs.electricity.rateMode, 'dual');
+  assert.equal(store.get().preferences.costs.feedIn.rateMode, 'dual');
+  const restored = await createStore(directory, 'demo');
+  assert.equal(restored.get().preferences.costs.electricity.highRate.value, 0.4);
+  assert.equal(restored.get().preferences.costs.feedIn.lowRate.value, 0.05);
+  const invalid = { ...costs, feedIn: { ...costs.feedIn, highRate: { source: 'entity', value: null, entityId: 'sensor.demo_temperature' } } };
+  const rejected = await fetch(`${url}/api/preferences`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...defaultPreferences, costs: invalid }) });
+  assert.equal(rejected.status, 400);
+});
+
+test('bestaande laag/hoog-instellingen blijven behouden als tweevoudig tarief', async context => {
   const { store, directory } = await fixture(context);
   const config = store.get();
   config.preferences.costs.electricity = { enabled: true,
@@ -267,7 +289,9 @@ test('bestaande laag/hoog-instellingen migreren naar één ingevuld all-in tarie
   delete config.preferences.costs.feedIn;
   await writeFile(join(directory, 'settings.json'), JSON.stringify(config));
   const restored = await createStore(directory, 'demo');
-  assert.deepEqual(restored.get().preferences.costs.electricity, { enabled: true, rate: config.preferences.costs.electricity.lowRate });
+  assert.equal(restored.get().preferences.costs.electricity.rateMode, 'dual');
+  assert.equal(restored.get().preferences.costs.electricity.lowRate.value, 0.234567);
+  assert.equal(restored.get().preferences.costs.electricity.highRate.value, 0.345678);
   assert.equal(restored.get().preferences.costs.feedIn.enabled, false);
 });
 

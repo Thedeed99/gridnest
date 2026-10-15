@@ -18,11 +18,18 @@ const costRateSchema = z.object({
 }).strict().default({});
 
 const energyCostsSchema = z.object({
-  electricity: z.object({ enabled: z.boolean().default(false), rate: costRateSchema.optional(), lowRate: costRateSchema.optional(), highRate: costRateSchema.optional() }).strict().default({}).transform(value => ({
-    enabled: value.enabled,
-    rate: value.rate ?? [value.lowRate, value.highRate].find(rate => rate && (rate.value !== null || rate.entityId)) ?? costRateSchema.parse({})
-  })),
-  feedIn: z.object({ enabled: z.boolean().default(false), rate: costRateSchema }).strict().default({}),
+  electricity: z.object({ enabled: z.boolean().default(false), rateMode: z.enum(['single', 'dual']).optional(),
+    rate: costRateSchema.optional(), lowRate: costRateSchema.optional(), highRate: costRateSchema.optional() }).strict().default({}).transform(value => {
+    const configuredLegacyRates = [value.lowRate, value.highRate].filter(rate => rate && (rate.value !== null || rate.entityId));
+    const rateMode = value.rateMode ?? (value.rate || configuredLegacyRates.length < 2 ? 'single' : 'dual');
+    return {
+      enabled: value.enabled, rateMode,
+      rate: value.rate ?? configuredLegacyRates[0] ?? costRateSchema.parse({}),
+      lowRate: value.lowRate ?? costRateSchema.parse({}), highRate: value.highRate ?? costRateSchema.parse({})
+    };
+  }),
+  feedIn: z.object({ enabled: z.boolean().default(false), rateMode: z.enum(['single', 'dual']).default('single'),
+    rate: costRateSchema, lowRate: costRateSchema, highRate: costRateSchema }).strict().default({}),
   gas: z.object({ enabled: z.boolean().default(false), rate: costRateSchema }).strict().default({}),
   water: z.object({ enabled: z.boolean().default(false), rate: costRateSchema }).strict().default({})
 }).strict().default({});
