@@ -1,4 +1,4 @@
-import { createIcons, Activity, Link, SlidersHorizontal, RefreshCw, HousePlug, House, Sun, Moon, Flame, Droplet, Plug, Car, Heater, BatteryCharging, Battery, Thermometer, ArrowUpRight, ArrowDownLeft, Lock, Unlock, Clock3, EllipsisVertical, Power, Save, Search, Check, Unplug, Plus, Pencil, Trash2, X, ListChecks, Pause, Play, Menu, Minus, CloudLightning } from 'lucide';
+import { createIcons, Activity, Link, SlidersHorizontal, RefreshCw, HousePlug, House, Sun, Moon, Flame, Droplet, Plug, Car, Heater, BatteryCharging, Battery, Thermometer, ArrowUpRight, ArrowDownLeft, Lock, Unlock, Clock3, EllipsisVertical, Power, Save, Search, Check, Unplug, Plus, Pencil, Trash2, X, ListChecks, Pause, Play, Menu, Minus, CloudLightning, ChevronDown } from 'lucide';
 import { Chart } from 'chart.js/auto';
 import { createId } from './ids.js';
 import { climateStatus, modeLabel, onlyRoomTargetChanged } from './status.js';
@@ -18,7 +18,7 @@ function isCompatibleEntity(role, entity) {
     (!role.deviceClasses || role.deviceClasses.includes(entity.deviceClass));
 }
 
-const icons = { Activity, Link, SlidersHorizontal, RefreshCw, HousePlug, House, Sun, Moon, Flame, Droplet, Plug, Car, Heater, BatteryCharging, Battery, Thermometer, ArrowUpRight, ArrowDownLeft, Lock, Unlock, Clock3, EllipsisVertical, Power, Save, Search, Check, Unplug, Plus, Pencil, Trash2, X, ListChecks, Pause, Play, Menu, Minus, CloudLightning };
+const icons = { Activity, Link, SlidersHorizontal, RefreshCw, HousePlug, House, Sun, Moon, Flame, Droplet, Plug, Car, Heater, BatteryCharging, Battery, Thermometer, ArrowUpRight, ArrowDownLeft, Lock, Unlock, Clock3, EllipsisVertical, Power, Save, Search, Check, Unplug, Plus, Pencil, Trash2, X, ListChecks, Pause, Play, Menu, Minus, CloudLightning, ChevronDown };
 const main = document.querySelector('#main');
 let data;
 let view = 'overview';
@@ -39,6 +39,10 @@ let dailyRecapCache;
 let dailyRecapPanelNode;
 let dailyRecapContentNode;
 let dailyRecapLoadPromise;
+let energyCostsCache;
+let energyCostsCacheKey;
+let energyCostsFetchedAt = 0;
+let energyCostsRequest;
 const liveBindings = new Map();
 let solarLimitConsentEntity;
 let solarLimitPending = false;
@@ -170,6 +174,8 @@ async function refresh(showButtonProgress = false) {
       if (view === 'rules') updateRuleStatus();
       if (view === 'overview' && dailyRecapPanelNode && (!dailyRecapCache || Date.now() - dailyRecapCache.fetchedAt > 30000)) loadDailyRecap(dailyRecapContentNode);
       if (view === 'overview') {
+        const costsPanel = main.querySelector('.energy-costs-panel');
+        if (costsPanel && Date.now() - energyCostsFetchedAt > 30000) loadEnergyCosts(costsPanel, true);
         for (const [utility, preference, role] of [['gas', 'showGas', 'gasConsumption'], ['water', 'showWater', 'waterConsumption']]) {
           const entityId = data.mappings[role];
           const status = main.querySelector(`.utility-history-${utility}`);
@@ -277,10 +283,102 @@ function batteryFlowSummary() {
   return { powerKw, label };
 }
 
+function energyCostKey() {
+  return JSON.stringify({ mappings: data.mappings, costs: data.preferences.costs });
+}
+
+function currency(value) {
+  return value === null || value === undefined ? '—' : new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' }).format(value);
+}
+
+function renderEnergyCosts(container, summary) {
+  const resources = summary.resources;
+  const complete = resources.length > 0 && resources.every(resource => resource.status === null);
+  const today = complete ? resources.reduce((total, resource) => total + resource.today, 0) : null;
+  const month = complete ? resources.reduce((total, resource) => total + resource.month, 0) : null;
+  container.querySelector('[data-cost-today]').textContent = complete ? currency(today) : 'Onvolledig';
+  container.querySelector('[data-cost-month]').textContent = complete ? currency(month) : 'Onvolledig';
+  const content = container.querySelector('.energy-costs-content');
+  content.replaceChildren();
+  const headings = element('div', 'energy-cost-row energy-cost-headings');
+  headings.append(element('span', '', 'Verbruik'), element('span', '', 'Vandaag'), element('span', '', 'Deze maand'));
+  content.append(headings);
+  for (const resource of summary.resources) {
+    const row = element('div', 'energy-cost-row');
+    row.append(element('strong', '', resource.label));
+    if (resource.status) {
+      const status = element('span', 'energy-cost-status', resource.status);
+      status.title = resource.details.map(detail => `${detail.label}: ${detail.price === null ? 'tarief ontbreekt' : currency(detail.price)}`).join(' · ');
+      row.append(status);
+    } else {
+      row.append(element('span', '', currency(resource.today)), element('span', '', currency(resource.month)));
+    }
+    content.append(row);
+    if (resource.key === 'electricity' && resource.details.length) {
+      const breakdown = element('details', 'energy-cost-breakdown');
+      breakdown.append(element('summary', '', 'Laag/hoog uitsplitsing'));
+      for (const detail of resource.details) {
+        const detailRow = element('div', 'energy-cost-detail');
+        detailRow.append(element('span', '', detail.label), element('span', '', currency(detail.todayCost)), element('span', '', currency(detail.monthCost)));
+        breakdown.append(detailRow);
+      }
+      content.append(breakdown);
+    }
+  }
+}
+
+function energyCostsPanel() {
+  const panel = element('details', 'energy-costs-panel');
+  const summary = element('summary', 'energy-costs-summary');
+  summary.append(element('strong', 'energy-costs-summary-title', 'Kosten'));
+  for (const [key, title] of [['today', 'Vandaag'], ['month', 'Deze maand']]) {
+    const amount = element('span', 'energy-costs-summary-amount');
+    amount.append(element('small', '', title), element('strong', '', 'Laden…'));
+    amount.lastElementChild.dataset[`cost${key === 'today' ? 'Today' : 'Month'}`] = '';
+    summary.append(amount);
+  }
+  const disclosure = element('span', 'energy-cost-chevron');
+  disclosure.append(icon('chevron-down'));
+  summary.append(disclosure);
+  const content = element('div', 'energy-costs-content');
+  content.append(element('p', 'muted', 'Kosten ophalen…'));
+  panel.append(summary, content);
+  loadEnergyCosts(panel);
+  return panel;
+}
+
+async function loadEnergyCosts(panel, reload = false) {
+  const key = energyCostKey();
+  if (!reload && energyCostsCache && energyCostsCacheKey === key && Date.now() - energyCostsFetchedAt <= 30000) {
+    renderEnergyCosts(panel, energyCostsCache);
+    return;
+  }
+  try {
+    if (energyCostsRequest?.key !== key) energyCostsRequest = { key, promise: api('energy-costs') };
+    const result = await energyCostsRequest.promise;
+    if (energyCostsRequest?.key === key) energyCostsRequest = undefined;
+    if (!document.body.contains(panel) || key !== energyCostKey()) return;
+    energyCostsCache = result;
+    energyCostsCacheKey = key;
+    energyCostsFetchedAt = Date.now();
+    renderEnergyCosts(panel, result);
+  } catch (error) {
+    if (!document.body.contains(panel)) return;
+    panel.querySelector('[data-cost-today]').textContent = 'Niet beschikbaar';
+    panel.querySelector('[data-cost-month]').textContent = 'Niet beschikbaar';
+    const content = panel.querySelector('.energy-costs-content');
+    content.replaceChildren(element('p', 'energy-cost-status', error.message));
+  }
+}
+
 function overview() {
   const visibleRoles = data.roles.filter(role => role.id !== 'presence');
   const mapped = visibleRoles.filter(role => Boolean(data.mappings[role.id])).length;
-  heading('Energie in huis', data.demo ? 'Voorbeeldwoning · fictieve meetwaarden' : 'Actuele metingen uit Home Assistant');
+  const pageHeading = heading('Energie in huis', data.demo ? 'Voorbeeldwoning · fictieve meetwaarden' : 'Actuele metingen uit Home Assistant');
+  if (Object.values(data.preferences.costs ?? {}).some(item => item.enabled)) {
+    pageHeading.classList.add('overview-page-heading');
+    pageHeading.append(energyCostsPanel());
+  }
   const metrics = element('section', 'metrics');
   metrics.setAttribute('aria-label', 'Actuele meetwaarden');
   for (const [role, title, name] of [['totalConsumption', 'Woningverbruik', 'house-plug'], ['solar', 'Zonneproductie', 'sun'], ['gridImport', 'Netafname', 'plug'], ['temperature', 'Woonkamer', 'thermometer']]) {
@@ -1995,7 +2093,7 @@ function entities() {
       const group = role.id.startsWith('ev') ? 'Laadpaal'
         : role.id.startsWith('battery') ? 'Hoofdbatterij'
           : role.id.startsWith('solar') ? 'Zonnepanelen'
-            : role.id.startsWith('grid') || role.id.startsWith('phase') ? 'Net & fasen'
+            : role.id.startsWith('grid') || role.id.startsWith('phase') || role.id.startsWith('electricity') ? 'Net & fasen'
               : ['gasConsumption', 'waterConsumption'].includes(role.id) ? 'Gas & water'
                 : ['temperature', 'climate'].includes(role.id) ? 'Warmte' : 'Verbruikers';
       if (!groups.has(group)) {
@@ -2280,6 +2378,78 @@ function preferences() {
     utilitySection.append(label);
   }
   form.append(utilitySection);
+  const energyCostsSection = element('section', 'preference-section energy-cost-settings');
+  energyCostsSection.append(element('h2', '', 'Kostenoverzicht'), element('p', 'subtitle', 'Kies welke kosten op de startpagina verschijnen. Schakel uit om een kostensoort te verbergen.'));
+  preferencesDraft.costs ??= {
+    electricity: { enabled: false, lowRate: { source: 'manual', value: null, entityId: null }, highRate: { source: 'manual', value: null, entityId: null } },
+    gas: { enabled: false, rate: { source: 'manual', value: null, entityId: null } },
+    water: { enabled: false, rate: { source: 'manual', value: null, entityId: null } }
+  };
+  function costRateControl(parent, title, rate, unit) {
+    const rateFields = element('div', 'cost-rate-fields');
+    rateFields.append(element('strong', 'cost-rate-title', title));
+    const sourceLabel = element('label', 'mapping-setting');
+    sourceLabel.append(element('span', '', 'Tariefbron'));
+    const source = element('select');
+    for (const [value, text] of [['manual', 'Zelf invullen'], ['entity', 'Prijsentiteit']]) {
+      const option = element('option', '', text); option.value = value; source.append(option);
+    }
+    source.value = rate.source;
+    source.addEventListener('change', () => { rate.source = source.value; update(); });
+    sourceLabel.append(source);
+
+    const manualLabel = element('label', 'mapping-setting');
+    manualLabel.append(element('span', '', `Prijs (${unit})`));
+    const manual = element('input', 'text-input');
+    manual.type = 'number'; manual.min = '0'; manual.max = '100'; manual.step = '0.0001';
+    manual.value = rate.value ?? '';
+    manual.addEventListener('input', () => { rate.value = manual.value === '' ? null : Number(manual.value); });
+    manualLabel.append(manual);
+
+    const entityLabel = element('label', 'mapping-setting');
+    entityLabel.append(element('span', '', `Prijsentiteit (${unit})`));
+    const entitySelect = element('select');
+    const expected = unit.toLowerCase().replaceAll('³', '3').replaceAll('€', 'eur').replaceAll(' ', '');
+    const unitMatches = entity => String(entity.unit).toLowerCase().replaceAll('³', '3').replaceAll('€', 'eur').replaceAll(' ', '') === expected;
+    const candidates = data.entities.filter(entity => entity.domain === 'sensor' && unitMatches(entity));
+    entitySelect.append(element('option', '', 'Selecteer prijsentiteit'));
+    entitySelect.firstElementChild.value = '';
+    for (const entity of candidates) {
+      const option = element('option', '', `${entity.name} (${entity.id})`); option.value = entity.id; entitySelect.append(option);
+    }
+    if (rate.entityId && !candidates.some(entity => entity.id === rate.entityId)) {
+      const missing = element('option', '', `${rate.entityId} · niet beschikbaar`); missing.value = rate.entityId; entitySelect.append(missing);
+    }
+    entitySelect.value = rate.entityId ?? '';
+    entitySelect.addEventListener('change', () => { rate.entityId = entitySelect.value || null; });
+    entityLabel.append(entitySelect);
+    rateFields.append(sourceLabel, manualLabel, entityLabel);
+    function update() {
+      manualLabel.hidden = rate.source !== 'manual';
+      entityLabel.hidden = rate.source !== 'entity';
+    }
+    update();
+    parent.append(rateFields);
+  }
+  for (const [key, title, rates] of [
+    ['electricity', 'Stroom', [['Laag tarief', 'lowRate', '€/kWh'], ['Hoog tarief', 'highRate', '€/kWh']]],
+    ['gas', 'Gas', [['Gasprijs', 'rate', '€/m³']]],
+    ['water', 'Water', [['Waterprijs', 'rate', '€/m³']]]
+  ]) {
+    const resource = preferencesDraft.costs[key];
+    const setting = element('div', 'energy-cost-option');
+    const label = element('label', 'checkbox-field');
+    const enabled = element('input'); enabled.type = 'checkbox'; enabled.checked = resource.enabled;
+    const fields = element('div', 'energy-cost-option-fields'); fields.hidden = !resource.enabled;
+    enabled.addEventListener('change', () => { resource.enabled = enabled.checked; fields.hidden = !enabled.checked; });
+    label.append(enabled, element('strong', '', `${title} opnemen in overzicht`));
+    setting.append(label);
+    if (key === 'electricity') fields.append(element('p', 'muted', 'Koppel laag- en hoogtariefmeters onder Koppelingen om beide tarieven apart te berekenen.'));
+    for (const [rateTitle, rateKey, unit] of rates) costRateControl(fields, rateTitle, resource[rateKey], unit);
+    setting.append(fields);
+    energyCostsSection.append(setting);
+  }
+  form.append(energyCostsSection);
   const refreshSection = element('section', 'preference-section');
   refreshSection.append(element('h2', '', 'Metingen verversen'));
   const refreshLabel = element('label', 'mapping-setting');

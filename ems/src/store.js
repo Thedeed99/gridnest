@@ -11,10 +11,23 @@ export const heatingProfiles = [
   { id: 'radiators', name: 'Radiatoren / convectoren', advice: 'Reageren meestal sneller dan een zware vloer. Verwarmen rond aanwezigheid kan passen. Aanvoertemperatuur, isolatie en warmtebron bepalen de beste verlaging en opwarmtijd.' }
 ];
 
+const costRateSchema = z.object({
+  source: z.enum(['manual', 'entity']).default('manual'),
+  value: z.number().min(0).max(100).nullable().default(null),
+  entityId: z.string().regex(/^sensor\.[a-z0-9_]+$/).nullable().default(null)
+}).strict().default({});
+
+const energyCostsSchema = z.object({
+  electricity: z.object({ enabled: z.boolean().default(false), lowRate: costRateSchema, highRate: costRateSchema }).strict().default({}),
+  gas: z.object({ enabled: z.boolean().default(false), rate: costRateSchema }).strict().default({}),
+  water: z.object({ enabled: z.boolean().default(false), rate: costRateSchema }).strict().default({})
+}).strict().default({});
+
 export const preferencesSchema = z.object({
   presenceEntities: z.array(z.string().regex(/^(person|device_tracker|binary_sensor)\.[a-z0-9_]+$/)).max(20).default([]).refine(ids => new Set(ids).size === ids.length, { message: 'Selecteer elke persoon of aanwezigheidssensor maar een keer.' }),
   presenceMode: z.enum(['any', 'all']).default('any'),
   showGas: z.boolean().default(false), showWater: z.boolean().default(false),
+  costs: energyCostsSchema,
   showBatteries: z.boolean().default(true),
   confirmSwitches: z.boolean().default(true),
   refreshSeconds: z.number().int().refine(value => [0, 1, 5, 10, 30, 60].includes(value), { message: 'Kies een geldig verversingsinterval.' }).default(10),
@@ -28,6 +41,7 @@ export const preferencesSchema = z.object({
 
 export const defaultPreferences = {
   presenceEntities: [], presenceMode: 'any', showGas: false, showWater: false,
+  costs: energyCostsSchema.parse({}),
   showBatteries: true,
   confirmSwitches: true,
   refreshSeconds: 10,

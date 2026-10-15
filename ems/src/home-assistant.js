@@ -39,6 +39,8 @@ export const roles = [
   { id: 'phase3Current', name: 'Stroomsterkte L3', domain: 'sensor', units: ['A'], icon: 'activity', description: 'Actuele stroomsterkte op fase L3.' },
   { id: 'phase3Voltage', name: 'Spanning L3', domain: 'sensor', units: ['V'], icon: 'activity', description: 'Actuele spanning op fase L3.' },
   { id: 'phase3Power', name: 'Vermogen L3', domain: 'sensor', units: ['W', 'kW'], icon: 'activity', description: 'Werkelijk gemeten vermogen op fase L3.' },
+  { id: 'electricityLow', name: 'Stroom · Laag tarief', domain: 'sensor', units: ['kWh'], icon: 'activity', description: 'Cumulatieve kWh-meter voor laag tarief; vereist Home Assistant-statistieken.' },
+  { id: 'electricityHigh', name: 'Stroom · Hoog tarief', domain: 'sensor', units: ['kWh'], icon: 'activity', description: 'Cumulatieve kWh-meter voor hoog tarief; vereist Home Assistant-statistieken.' },
   { id: 'gasConsumption', name: 'Gasverbruik', domain: 'sensor', units: ['m³', 'm3'], icon: 'flame', description: 'Cumulatieve gasmeterstand in kubieke meters.' },
   { id: 'waterConsumption', name: 'Waterverbruik', domain: 'sensor', units: ['m³', 'm3'], icon: 'droplet', description: 'Cumulatieve watermeterstand in kubieke meters.' },
   { id: 'gridPower', name: 'Netvermogen (positief / negatief)', domain: 'sensor', units: ['W', 'kW'], icon: 'plug', description: 'Een getekende netsensor voor afname en teruglevering; stel de tekenrichting in.' },
@@ -132,10 +134,11 @@ export function validateMappings(input, entities) {
     const entity = entities.find(item => item.id === id);
     if (!entity || !compatible(role, entity)) throw new Error(`Geen passende entiteit voor ${role.name}.`);
     if (role.id === 'solarToday' && mappings.solarTodayMode === 'total' && !['total', 'total_increasing'].includes(entity.stateClass)) throw new Error('Zonneopbrengst uit een totaalmeter vereist een cumulatieve energie-entiteit.');
-    if (['gasConsumption', 'waterConsumption', 'evEnergyTotal'].includes(role.id) && !['total', 'total_increasing'].includes(entity.stateClass)) throw new Error(`${role.name} vereist een cumulatieve meterstand.`);
+    if (['gasConsumption', 'waterConsumption', 'evEnergyTotal', 'electricityLow', 'electricityHigh'].includes(role.id) && !['total', 'total_increasing'].includes(entity.stateClass)) throw new Error(`${role.name} vereist een cumulatieve meterstand.`);
   }
   if (mappings.gridImport && mappings.gridImport === mappings.gridExport) throw new Error('Netafname en teruglevering moeten afzonderlijke sensoren zijn.');
   if (mappings.totalConsumption && mappings.totalConsumption === mappings.knownConsumption) throw new Error('Woningverbruik en bekend verbruik moeten afzonderlijke metingen zijn.');
+  if (mappings.electricityLow && mappings.electricityLow === mappings.electricityHigh) throw new Error('Laag en hoog tarief moeten afzonderlijke kWh-meters zijn.');
   for (const id of mappings.knownConsumers) {
     const entity = entities.find(item => item.id === id);
     if (!entity || !compatible(roles[0], entity)) throw new Error('Een bekende verbruiker moet een vermogenssensor in W of kW zijn.');

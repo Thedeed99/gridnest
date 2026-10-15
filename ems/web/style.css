@@ -11,7 +11,7 @@ button, input, select { border-radius: 6px; }
 button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible { outline: 3px solid #d0a625; outline-offset: 3px; }
 svg { width: 20px; height: 20px; flex-shrink: 0; }
 .shell { display: grid; grid-template-columns: 218px minmax(0, 1fr); min-height: 100dvh; }
-.sidebar { position: sticky; top: 0; height: 100vh; height: 100dvh; align-self: start; background: var(--surface); border-right: 1px solid var(--line); display: flex; flex-direction: column; padding: 32px 18px 24px; }
+.sidebar { position: sticky; top: 0; height: 100vh; height: 100dvh; align-self: start; overflow-y: auto; overscroll-behavior: contain; background: var(--surface); border-right: 1px solid var(--line); display: flex; flex-direction: column; padding: 32px 18px 24px; }
 .brand { display: flex; align-items: center; gap: 12px; text-decoration: none; color: var(--text); font-weight: 800; font-size: 18px; line-height: 1.3; padding: 0 10px; }
 .brand-icon { display: grid; place-items: center; background: var(--green); color: #fff; width: 40px; height: 40px; border-radius: 6px; }
 .brand-icon svg { width: 25px; height: 25px; }
@@ -147,6 +147,35 @@ footer { display: flex; justify-content: space-between; gap: 12px; font-size: 10
 .system-mode-card .rule-controlbar { margin-top: 10px; }
 
 .page-heading { display: flex; justify-content: space-between; align-items: center; gap: 20px; }
+.overview-page-heading { align-items: flex-start; }
+.energy-costs-panel { width: min(390px, 52%); flex: 0 1 390px; min-width: 0; }
+.energy-costs-summary { display: grid; grid-template-columns: auto repeat(2, minmax(72px, 1fr)) 18px; align-items: center; gap: 12px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); cursor: pointer; list-style: none; }
+.energy-costs-summary::-webkit-details-marker { display: none; }
+.energy-costs-summary-title { font-size: 12px; }
+.energy-costs-summary-amount { display: flex; flex-direction: column; gap: 2px; text-align: right; }
+.energy-costs-summary-amount small { color: var(--muted); font-size: 9px; }
+.energy-costs-summary-amount strong { font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.energy-cost-chevron { display: grid; place-items: center; color: var(--muted); }
+.energy-cost-chevron svg { width: 16px; height: 16px; transition: transform 150ms ease; }
+.energy-costs-panel[open] .energy-cost-chevron svg { transform: rotate(180deg); }
+.energy-costs-content { margin-top: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+.energy-cost-row { display: grid; grid-template-columns: minmax(70px, 1fr) minmax(62px, auto) minmax(76px, auto); align-items: center; gap: 12px; padding: 5px 0; font-size: 11px; }
+.energy-cost-row > :nth-child(n + 2) { text-align: right; font-variant-numeric: tabular-nums; }
+.energy-cost-row strong { font-size: 11px; }
+.energy-cost-headings { border-bottom: 1px solid var(--line); color: var(--muted); font-size: 9px; }
+.energy-cost-status { grid-column: 2 / -1; color: var(--muted); text-align: right; }
+.energy-cost-breakdown { border-top: 1px solid var(--line); padding-top: 6px; margin-top: 4px; font-size: 10px; }
+.energy-cost-breakdown summary { color: var(--muted); cursor: pointer; }
+.energy-cost-detail { display: grid; grid-template-columns: minmax(70px, 1fr) minmax(62px, auto) minmax(76px, auto); gap: 12px; padding: 4px 0 0; }
+.energy-cost-detail > :nth-child(n + 2) { text-align: right; font-variant-numeric: tabular-nums; }
+.energy-cost-option { border-top: 1px solid var(--line); padding: 14px 0 4px; }
+.energy-cost-option > .checkbox-field { padding: 2px 0 8px; }
+.energy-cost-option-fields { margin-left: 28px; }
+.cost-rate-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: end; gap: 12px; margin: 8px 0 16px; }
+.cost-rate-title { grid-column: 1 / -1; font-size: 12px; }
+.cost-rate-fields .mapping-setting { min-width: 0; max-width: none; margin-top: 0; }
+.cost-rate-fields .mapping-setting > span { font-size: 11px; }
+.cost-rate-fields input, .cost-rate-fields select { width: 100%; }
 .page-heading-actions { display: flex; align-items: center; gap: 8px; }
 .floor-section { padding: 22px 0; border-top: 1px solid var(--line); }
 .room-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 18px; }
@@ -473,6 +502,7 @@ footer { display: flex; justify-content: space-between; gap: 12px; font-size: 10
 	.sidebar-bottom { display: block; }
 }
 @media (max-width: 680px) { .condition-row > .entity-picker { grid-column: 1 / -1; } .saved-rule > .section-heading { flex-wrap: wrap; } .rule-tools { margin-left: auto; } }
+@media (max-width: 680px) { .overview-page-heading { display: block; } .energy-costs-panel { width: 100%; margin-top: 18px; } .cost-rate-fields { grid-template-columns: minmax(0, 1fr); gap: 8px; } .cost-rate-title { grid-column: auto; } .energy-cost-option-fields { margin-left: 0; } }
 @media (max-width: 680px) { nav { grid-template-columns: repeat(5, minmax(0, 1fr)); } nav button { font-size: 9px; } .rule-controlbar { flex-wrap: wrap; } .rule-controlbar .mapping-setting { flex-basis: 100%; } .rule-controlbar .primary-button { flex: 1; } .condition-row { grid-template-columns: minmax(0, 1fr) 36px; } .condition-row > .mapping-setting { grid-column: 1 / -1; } .condition-values { grid-column: 1; grid-template-columns: minmax(0, 1fr); } .rule-dialog .mapping-setting > span { font-size: 11px; } }
 @media (max-width: 1000px) { .shell { grid-template-columns: 190px minmax(0, 1fr); } main { padding: 28px 26px; } .topbar { padding: 0 26px; } .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; } .metric:nth-child(2) { border: 0; } footer { padding-inline: 26px; } }
 @media (max-width: 680px) { .shell { display: block; } .sidebar { padding: 16px 16px 0; border-right: 0; border-bottom: 1px solid var(--line); } .brand { font-size: 15px; gap: 10px; padding: 0; } .brand br { display: none; } .brand-icon { width: 32px; height: 32px; } .brand-icon svg { width: 21px; height: 21px; } nav { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; margin-top: 14px; } nav button { justify-content: center; gap: 6px; font-size: 11px; padding: 8px 3px; min-height: 44px; border-radius: 4px 4px 0 0; } nav svg { width: 16px; height: 16px; } .sidebar-bottom { display: none; } .topbar { height: 54px; padding-inline: 18px; font-size: 11px; } main { padding: 24px 18px; } h1 { font-size: 24px; } .page-heading { margin-bottom: 24px; } .metrics { gap: 22px 12px; padding: 20px 0; } .metric-label { font-size: 11px; } .metric strong { font-size: 18px; } .flow { height: 300px; } .flow-node strong { font-size: 11px; } .flow-node small { font-size: 9px; } .flow-node { max-width: 105px; padding: 8px 2px; } .flow-node svg { width: 23px; height: 23px; } .home-node svg { width: 32px; height: 32px; } .setup-status { align-items: flex-start; flex-direction: column; gap: 16px; } .entity-toolbar { flex-direction: column; align-items: stretch; gap: 12px; } .search-field { width: 100%; } .entity-row { grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 18px 0; } .preference-fields { gap: 20px 16px; } .number-field > span { min-height: 32px; } .form-actions .primary-button { width: 100%; } footer { padding: 12px 18px 24px; font-size: 9px; } }

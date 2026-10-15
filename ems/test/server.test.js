@@ -213,6 +213,37 @@ test('metergeschiedenis-API gebruikt alleen de ingestelde meter', async context 
   assert.equal((await fetch(`${url}/api/utility-history/water`)).status, 403);
 });
 
+test('kosten-API blijft leeg als alles uit staat en berekent alleen ingeschakelde kosten', async context => {
+  let calls = 0;
+  const { url, store } = await fixture(context, { energyCostsProvider: async (config, entities) => {
+    calls++;
+    assert.equal(config.mappings.gasConsumption, 'sensor.demo_gas');
+    assert.equal(entities.some(entity => entity.id === 'sensor.demo_price_gas'), true);
+    return { resources: [{ key: 'gas', label: 'Gas', today: 0.7, month: 14.5 }] };
+  } });
+  assert.deepEqual(await (await fetch(`${url}/api/energy-costs`)).json(), { resources: [] });
+  assert.equal(calls, 0);
+  await store.update({ mappings: { ...emptyMappings, gasConsumption: 'sensor.demo_gas' }, preferences: {
+    ...defaultPreferences,
+    costs: { ...defaultPreferences.costs, gas: { enabled: true, rate: { source: 'entity', value: null, entityId: 'sensor.demo_price_gas' } } }
+  } });
+  const response = await fetch(`${url}/api/energy-costs`);
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).resources.map(item => [item.key, item.today, item.month]), [['gas', 0.7, 14.5]]);
+  assert.equal(calls, 1);
+});
+
+test('tariefvoorkeuren accepteren geldige sensoreenheden en weigeren een verkeerde eenheid', async context => {
+  const { url, store } = await fixture(context);
+  const costs = { ...defaultPreferences.costs,
+    gas: { enabled: true, rate: { source: 'entity', value: null, entityId: 'sensor.demo_price_gas' } } };
+  const save = next => fetch(`${url}/api/preferences`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...defaultPreferences, costs: next }) });
+  assert.equal((await save(costs)).status, 200);
+  const invalid = { ...costs, gas: { enabled: true, rate: { source: 'entity', value: null, entityId: 'sensor.demo_temperature' } } };
+  assert.equal((await save(invalid)).status, 400);
+  assert.equal(store.get().preferences.costs.gas.rate.entityId, 'sensor.demo_price_gas');
+});
+
 test('dagrecap-API retourneert de meters voor het overzicht', async context => {
   const { url, store } = await fixture(context, { dailyRecapProvider: async mappings => ({
     available: true, complete: true, rows: [{ label: mappings.knownConsumerNames['sensor.demo_ev_power'], energyKwh: 4.2 }]
