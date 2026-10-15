@@ -8,7 +8,7 @@ De startpagina met fictieve demo-entiteiten en meetwaarden, zonder persoonlijke 
 
 ![Gridnest-startpagina met energiestromen, fasewaarden, bekende verbruikers, kamers en dagrecap](docs/images/gridnest-overview.png)
 
-## Eerste versie
+## Gridnest 2.0
 
 - Entiteiten uit de eigen Home Assistant selecteren op naam, type en eenheid.
 - Netafname, teruglevering, zonnepanelen, kamertemperatuur, verwarming, laadvermogen, batterijlading en aanwezigheid uitlezen.
@@ -23,6 +23,8 @@ De startpagina met fictieve demo-entiteiten en meetwaarden, zonder persoonlijke 
 - Uit, proefmodus en expliciet vrijgegeven actieve sturing; demo verstuurt nooit opdrachten.
 - Automatische regelcyclus met apparaatgrenzen, bevestigingscontrole, handmatige pauze en blokkering bij ontbrekende data.
 - Een expliciete demomodus met fictieve entiteiten, gescheiden van echte koppelingen.
+- Financieel overzicht met vaste en dynamische tarieven, laag/hoog-meterkoppelingen, 45-daagse prijshistorie en dynamische vooruitblik.
+- Toekomstige vaste prijzen plannen met een ingangsdatum; water gebruikt een vast tarief.
 
 ## Repository
 
@@ -57,7 +59,7 @@ Voor de eerste lokale Home Assistant OS-pilot is een bronpakket voorbereid. De [
 
 ## Store-route
 
-Een eigen repository toevoegen aan de Home Assistant Store is niet hetzelfde als opname in een officiële of communitycatalogus. De bronrepository is publiek; er is nog geen distributielicentie gekozen. Zonder licentie is hergebruik en verdere distributie door anderen niet toegestaan.
+Een eigen repository toevoegen aan de Home Assistant Store is niet hetzelfde als opname in een officiële of communitycatalogus. De bronrepository is publiek. De projectcode blijft auteursrechtelijk beschermd: alle rechten voorbehouden en geen licentie voor hergebruik of verdere distributie verleend.
 
 Zie [publicatiechecklist](docs/publication.md), [ontwikkelrichting](docs/roadmap.md) en [add-ondocumentatie](ems/DOCS.md).
 

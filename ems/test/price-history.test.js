@@ -44,3 +44,19 @@ test('tariefhistorie verwerpt ongeldige waarden en ruimt oudere samples op', asy
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test('tariefhistorie accepteert een korter opslaginterval voor dynamische kwartierprijzen', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'gridnest-price-history-'));
+  try {
+    const history = await createPriceHistory(directory);
+    const interval = 15 * 60 * 1000;
+    assert.equal(await history.record('sensor.dynamic_price', 0.2, 1000, interval), true);
+    assert.equal(await history.record('sensor.dynamic_price', 0.2, 1000 + interval - 1, interval), false);
+    assert.equal(await history.record('sensor.dynamic_price', 0.2, 1000 + interval, interval), true);
+    assert.equal(await history.record('rate.electricity_single', 0.234567, 1000, 24 * 60 * 60 * 1000), true);
+    assert.equal(history.get('sensor.dynamic_price').length, 2);
+    assert.deepEqual(history.get('rate.electricity_single'), [{ at: 1000, value: 0.234567 }]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

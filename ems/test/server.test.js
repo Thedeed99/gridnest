@@ -233,6 +233,41 @@ test('kosten-API blijft leeg als alles uit staat en berekent alleen ingeschakeld
   assert.equal(calls, 1);
 });
 
+test('tariefhistorie-API toont handmatige en dynamische samples zonder cache', async context => {
+  const history = {
+    all: () => ({
+      'rate.electricity_single': [{ at: 1000, value: 0.234567 }],
+      'sensor.demo_price_gas': [{ at: 2000, value: 1.28 }]
+    })
+  };
+  const { url, store } = await fixture(context, { priceHistory: history });
+  await store.update({ preferences: { ...defaultPreferences, costs: {
+    ...defaultPreferences.costs,
+    electricity: { ...defaultPreferences.costs.electricity, enabled: true, rate: { source: 'manual', value: 0.234567 } },
+    gas: { ...defaultPreferences.costs.gas, enabled: true, contractType: 'dynamic', rate: { source: 'entity', entityId: 'sensor.demo_price_gas' } }
+  } } });
+  const response = await fetch(`${url}/api/tariff-history`);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  const result = await response.json();
+  assert.equal(result.retentionDays, 45);
+  assert.deepEqual(result.rates.filter(rate => ['Stroom · all-in', 'Gas'].includes(rate.label)).map(rate => [rate.label, rate.contractType, rate.current, rate.samples.length]), [
+    ['Stroom · all-in', 'fixed', 0.234567, 1], ['Gas', 'dynamic', null, 1]
+  ]);
+});
+
+test('opslaan van een handmatig tarief legt direct een historisch sample vast', async context => {
+  const recorded = [];
+  const priceHistory = { all: () => ({}), record: async (...sample) => recorded.push(sample) };
+  const { url } = await fixture(context, { priceHistory });
+  const costs = { ...defaultPreferences.costs,
+    electricity: { ...defaultPreferences.costs.electricity, enabled: true, rate: { source: 'manual', value: 0.123456 } } };
+  const response = await fetch(`${url}/api/preferences`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...defaultPreferences, costs }) });
+  assert.equal(response.status, 200);
+  assert.deepEqual(recorded[0], ['rate.electricity_single', 0.123456, recorded[0][2], 23 * 60 * 60 * 1000]);
+  assert.ok(Number.isFinite(recorded[0][2]));
+});
+
 test('tariefvoorkeuren accepteren geldige sensoreenheden en weigeren een verkeerde eenheid', async context => {
   const { url, store } = await fixture(context);
   const costs = { ...defaultPreferences.costs,
@@ -242,6 +277,39 @@ test('tariefvoorkeuren accepteren geldige sensoreenheden en weigeren een verkeer
   const invalid = { ...costs, gas: { enabled: true, rate: { source: 'entity', value: null, entityId: 'sensor.demo_temperature' } } };
   assert.equal((await save(invalid)).status, 400);
   assert.equal(store.get().preferences.costs.gas.rate.entityId, 'sensor.demo_price_gas');
+});
+
+test('water ondersteunt alleen een vast tarief en migreert een oude prijssensor', async context => {
+  const { url, store } = await fixture(context);
+  const costs = { ...defaultPreferences.costs, water: { enabled: true, contractType: 'dynamic', interval: '15min',
+    rate: { source: 'entity', value: null, entityId: 'sensor.demo_price_water' } } };
+  const response = await fetch(`${url}/api/preferences`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...defaultPreferences, costs }) });
+  assert.equal(response.status, 200);
+  const water = store.get().preferences.costs.water;
+  assert.equal(water.contractType, 'fixed');
+  assert.equal(water.interval, 'day');
+  assert.equal(water.rate.source, 'manual');
+  assert.equal(water.rate.entityId, null);
+});
+
+test('toekomstige vaste tarieven worden opgeslagen en dubbele ingangsdatums geweigerd', async context => {
+  const { url, store } = await fixture(context);
+  const rate = { ...defaultPreferences.costs.electricity.rate, value: 0.24,
+    futureRates: [{ effectiveDate: '2026-11-01', value: 0.31 }] };
+  const save = costs => fetch(`${url}/api/preferences`, { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...defaultPreferences, costs }) });
+  const costs = { ...defaultPreferences.costs, electricity: { ...defaultPreferences.costs.electricity, enabled: true, rate } };
+  const saved = await save(costs);
+  assert.equal(saved.status, 200, await saved.text());
+  assert.deepEqual(store.get().preferences.costs.electricity.rate.futureRates, [{ effectiveDate: '2026-11-01', value: 0.31 }]);
+  const invalidRate = { ...rate, futureRates: [...rate.futureRates, { effectiveDate: '2026-11-01', value: 0.32 }] };
+  assert.equal((await save({ ...costs, electricity: { ...costs.electricity, rate: invalidRate } })).status, 400);
+  const tooMany = { ...rate, futureRates: [
+    { effectiveDate: '2026-11-01', value: 0.31 },
+    { effectiveDate: '2026-12-01', value: 0.32 },
+    { effectiveDate: '2027-01-01', value: 0.33 }
+  ] };
+  assert.equal((await save({ ...costs, electricity: { ...costs.electricity, rate: tooMany } })).status, 400);
 });
 
 test('financiële tarieven bewaren zes decimalen na opslaan en herstart', async context => {

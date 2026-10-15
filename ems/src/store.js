@@ -11,27 +11,50 @@ export const heatingProfiles = [
   { id: 'radiators', name: 'Radiatoren / convectoren', advice: 'Reageren meestal sneller dan een zware vloer. Verwarmen rond aanwezigheid kan passen. Aanvoertemperatuur, isolatie en warmtebron bepalen de beste verlaging en opwarmtijd.' }
 ];
 
+const scheduledRateSchema = z.object({
+  effectiveDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(value => {
+    const timestamp = Date.parse(`${value}T00:00:00Z`);
+    return Number.isFinite(timestamp) && new Date(timestamp).toISOString().slice(0, 10) === value;
+  }, { message: 'Gebruik een geldige ingangsdatum.' }),
+  value: z.number().min(0).max(100)
+}).strict();
+
 const costRateSchema = z.object({
   source: z.enum(['manual', 'entity']).default('manual'),
   value: z.number().min(0).max(100).nullable().default(null),
-  entityId: z.string().regex(/^sensor\.[a-z0-9_]+$/).nullable().default(null)
+  entityId: z.string().regex(/^sensor\.[a-z0-9_]+$/).nullable().default(null),
+  futureRates: z.array(scheduledRateSchema).max(2, 'Maximaal twee toekomstige tarieven per prijs.').default([]).refine(rates => new Set(rates.map(rate => rate.effectiveDate)).size === rates.length,
+    { message: 'Een tariefdatum mag maar een keer voorkomen.' })
 }).strict().default({});
+const tariffIntervalSchema = z.enum(['15min', 'hour', 'day']).default('hour');
+
+function contractType(value, rates) {
+  return value ?? (rates.some(rate => rate?.source === 'entity') ? 'dynamic' : 'fixed');
+}
 
 const energyCostsSchema = z.object({
-  electricity: z.object({ enabled: z.boolean().default(false), rateMode: z.enum(['single', 'dual']).optional(),
+  electricity: z.object({ enabled: z.boolean().default(false), contractType: z.enum(['fixed', 'dynamic']).optional(), interval: tariffIntervalSchema.optional(), rateMode: z.enum(['single', 'dual']).optional(),
     rate: costRateSchema.optional(), lowRate: costRateSchema.optional(), highRate: costRateSchema.optional() }).strict().default({}).transform(value => {
     const configuredLegacyRates = [value.lowRate, value.highRate].filter(rate => rate && (rate.value !== null || rate.entityId));
     const rateMode = value.rateMode ?? (value.rate || configuredLegacyRates.length < 2 ? 'single' : 'dual');
+    const rate = value.rate ?? configuredLegacyRates[0] ?? costRateSchema.parse({});
     return {
-      enabled: value.enabled, rateMode,
-      rate: value.rate ?? configuredLegacyRates[0] ?? costRateSchema.parse({}),
-      lowRate: value.lowRate ?? costRateSchema.parse({}), highRate: value.highRate ?? costRateSchema.parse({})
+      enabled: value.enabled, contractType: contractType(value.contractType, [rate, value.lowRate, value.highRate]),
+      interval: value.interval ?? 'hour', rateMode,
+      rate, lowRate: value.lowRate ?? costRateSchema.parse({}), highRate: value.highRate ?? costRateSchema.parse({})
     };
   }),
-  feedIn: z.object({ enabled: z.boolean().default(false), rateMode: z.enum(['single', 'dual']).default('single'),
-    rate: costRateSchema, lowRate: costRateSchema, highRate: costRateSchema }).strict().default({}),
-  gas: z.object({ enabled: z.boolean().default(false), rate: costRateSchema }).strict().default({}),
-  water: z.object({ enabled: z.boolean().default(false), rate: costRateSchema }).strict().default({})
+  feedIn: z.object({ enabled: z.boolean().default(false), contractType: z.enum(['fixed', 'dynamic']).optional(), interval: tariffIntervalSchema.optional(), rateMode: z.enum(['single', 'dual']).default('single'),
+    rate: costRateSchema, lowRate: costRateSchema, highRate: costRateSchema }).strict().default({}).transform(value => ({
+    ...value, contractType: contractType(value.contractType, [value.rate, value.lowRate, value.highRate]), interval: value.interval ?? 'hour'
+  })),
+  gas: z.object({ enabled: z.boolean().default(false), contractType: z.enum(['fixed', 'dynamic']).optional(), interval: tariffIntervalSchema.optional(), rate: costRateSchema }).strict().default({}).transform(value => ({
+    ...value, contractType: contractType(value.contractType, [value.rate]), interval: value.interval ?? 'hour'
+  })),
+  water: z.object({ enabled: z.boolean().default(false), contractType: z.enum(['fixed', 'dynamic']).optional(), interval: tariffIntervalSchema.optional(), rate: costRateSchema }).strict().default({}).transform(value => ({
+    ...value, contractType: 'fixed', interval: 'day',
+    rate: value.rate.source === 'entity' ? { ...value.rate, source: 'manual', entityId: null } : value.rate
+  }))
 }).strict().default({});
 
 export const preferencesSchema = z.object({

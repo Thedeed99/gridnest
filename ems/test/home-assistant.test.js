@@ -198,3 +198,30 @@ test('laag- en hoogtarief accepteren alleen verschillende cumulatieve kWh-meters
   assert.throws(() => validateMappings({ ...emptyMappings, electricityReturnLow: 'sensor.session' }, entities), /cumulatieve/);
   assert.throws(() => validateMappings({ ...emptyMappings, electricityLow: 'sensor.low_total', electricityReturnHigh: 'sensor.low_total' }, entities), /afzonderlijke/);
 });
+
+test('normaliseer alleen toekomstige prijswaarden uit prijsentiteiten', () => {
+  const entities = normalizeStates([
+    state('sensor.dynamic_price', 'EUR/kWh', '0.24', { forecast: [
+      { start: '2030-03-02T12:00:00Z', value: 0.2 },
+      { timestamp: '2030-03-02T12:15:00Z', price: '0.3' }
+    ], access_token: 'must-not-leak' }),
+    state('sensor.power', 'W', '120', { forecast: [{ start: '2030-03-02T12:00:00Z', value: 0.2 }] })
+  ]);
+  assert.deepEqual(entities[0].priceForecast, [
+    { at: Date.parse('2030-03-02T12:00:00Z'), value: 0.2 },
+    { at: Date.parse('2030-03-02T12:15:00Z'), value: 0.3 }
+  ]);
+  assert.equal(entities[1].priceForecast, undefined);
+  assert.equal(entities[0].attributes, undefined);
+});
+
+test('demo dynamische stroomprijzen bevatten een vooruitblik van 24 uur per kwartier', () => {
+  const now = Date.now();
+  for (const id of ['sensor.demo_price_low', 'sensor.demo_price_high']) {
+    const forecast = demoEntities().find(entity => entity.id === id).priceForecast;
+    assert.equal(forecast.length, 96);
+    assert.ok(forecast[0].at >= now - 15 * 60 * 1000);
+    assert.ok(forecast.at(-1).at <= now + 24 * 60 * 60 * 1000);
+    assert.ok(forecast.every(point => Number.isFinite(point.value)));
+  }
+});

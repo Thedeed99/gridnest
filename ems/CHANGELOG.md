@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.0.0 - 2026-10-15
+
+- Herstel het direct opnieuw tonen van het thema-icoon na wisselen tussen licht en donker.
+- Verplaats alle tariefkeuzes naar het tabblad Tarieven, met vaste/dynamische contracten en prijsintervallen per dag, uur of 15 minuten.
+- Bewaar vaste en dynamische tariefhistorie 45 dagen en toon die gegroepeerd per dag, uur of kwartier.
+- Plan toekomstige vaste tarieven met een ingangsdatum en toon dynamische prijsforecasts voor de komende 24 uur.
+- Beperk water tot een vast tarief.
+- Beperk toekomstige prijswijzigingen tot maximaal twee per afzonderlijk tarief; activeer ze automatisch op de ingangsdatum.
+
 ## 1.0.14 - 2026-10-15
 
 - Kies voor stroomverbruik en teruglevering onafhankelijk tussen één tarief of aparte lage en hoge tarieven.

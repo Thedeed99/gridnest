@@ -17,7 +17,8 @@
 ## Voor een publiek installeerbare release
 
 - [x] Publieke bronrepository onder het persoonlijke account gekozen: https://github.com/Thedeed99/gridnest.
-- [ ] Een distributielicentie en contactpersoon kiezen.
+- [x] Copyrightbeleid gekozen: alle rechten voorbehouden; geen licentie voor hergebruik of verdere distributie.
+- [ ] Contactpersoon voor publicatie en onderhoud vastleggen.
 - [ ] Icon en logo als PNG toevoegen en controleren.
 - [ ] Werkelijke installatie, herstart, back-up en herstel testen op Home Assistant OS.
 - [ ] Ingressacties, assetpaden en toegangscontrole op een echte Supervisor testen.
@@ -34,7 +35,7 @@ Een bruikbare eigen repository kan door gebruikers aan de Store worden toegevoeg
 
 ## Status van deze voorbereiding
 
-De bronrepository is publiek beschikbaar op https://github.com/Thedeed99/gridnest. Er is nog geen distributielicentie, versie-image of echte Home Assistant OS-installatietest. Container-smoke-tests draaien in CI voor beide architecturen; alleen een expliciete, met de pakketversie overeenkomende `v*`-tag publiceert een image.
+De bronrepository is publiek beschikbaar op https://github.com/Thedeed99/gridnest. De projecteigenaar heeft gekozen voor alle rechten voorbehouden; er is geen licentie voor hergebruik of verdere distributie. De officiële release-image wordt alleen na een expliciete, met de pakketversie overeenkomende `v*`-tag gepubliceerd. Een echte Home Assistant OS-installatie- en hersteltest blijft vereist voor een volledige catalogusaanmelding.
 
 Voor een lokale Home Assistant OS-pilot: pak het bronpakket uit en plaats de inhoud in `/addons/gridnest`, laad de Store opnieuw en installeer de lokale app. Begin met `allow_control: false` en proefmodus. Controleer Ingress, entiteiten, opslag en back-up/herstel. Geef echte sturing pas vrij nadat de installateur of eigenaar de apparaatvoorwaarden heeft gecontroleerd. Zie [pilotprocedure](pilot.md).
 
