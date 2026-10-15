@@ -2371,8 +2371,8 @@ function preferences() {
   const energyCostsSection = element('section', 'preference-section energy-cost-settings');
   energyCostsSection.append(element('h2', '', 'Financieel'));
   preferencesDraft.costs ??= {
-    electricity: { enabled: false, rate: { source: 'manual', value: null, entityId: null } },
-    feedIn: { enabled: false, rate: { source: 'manual', value: null, entityId: null } },
+    electricity: { enabled: false, rateMode: 'single', rate: { source: 'manual', value: null, entityId: null }, lowRate: { source: 'manual', value: null, entityId: null }, highRate: { source: 'manual', value: null, entityId: null } },
+    feedIn: { enabled: false, rateMode: 'single', rate: { source: 'manual', value: null, entityId: null }, lowRate: { source: 'manual', value: null, entityId: null }, highRate: { source: 'manual', value: null, entityId: null } },
     gas: { enabled: false, rate: { source: 'manual', value: null, entityId: null } },
     water: { enabled: false, rate: { source: 'manual', value: null, entityId: null } }
   };
@@ -2422,11 +2422,11 @@ function preferences() {
     update();
     parent.append(rateFields);
   }
-  for (const [key, title, rates] of [
-    ['electricity', 'Stroom', [['All-in stroomtarief', 'rate', '€/kWh']]],
-    ['feedIn', 'Terugleveropbrengst', [['Terugleververgoeding', 'rate', '€/kWh']]],
-    ['gas', 'Gas', [['Gasprijs', 'rate', '€/m³']]],
-    ['water', 'Water', [['Waterprijs', 'rate', '€/m³']]]
+  for (const [key, title, singleTitle, lowTitle, highTitle, unit] of [
+    ['electricity', 'Stroom', 'All-in stroomtarief', 'Laag tarief', 'Hoog tarief', '€/kWh'],
+    ['feedIn', 'Terugleveropbrengst', 'Terugleververgoeding', 'Vergoeding laag', 'Vergoeding hoog', '€/kWh'],
+    ['gas', 'Gas', 'Gasprijs', null, null, '€/m³'],
+    ['water', 'Water', 'Waterprijs', null, null, '€/m³']
   ]) {
     const resource = preferencesDraft.costs[key];
     const setting = element('div', 'energy-cost-option');
@@ -2436,7 +2436,40 @@ function preferences() {
     enabled.addEventListener('change', () => { resource.enabled = enabled.checked; fields.hidden = !enabled.checked; });
     label.append(enabled, element('strong', '', `${title} opnemen in overzicht`));
     setting.append(label);
-    for (const [rateTitle, rateKey, unit] of rates) costRateControl(fields, rateTitle, resource[rateKey], unit);
+    const rates = element('div', 'energy-cost-rates');
+    if (lowTitle) {
+      resource.rateMode ??= 'single';
+      const modeLabel = element('label', 'mapping-setting');
+      modeLabel.append(element('span', '', 'Aantal tarieven'));
+      const mode = element('select');
+      for (const [value, modeTitle] of [['single', 'Eén tarief voor laag en hoog'], ['dual', 'Apart tarief voor laag en hoog']]) {
+        const option = element('option', '', modeTitle); option.value = value; mode.append(option);
+      }
+      mode.value = resource.rateMode;
+      mode.addEventListener('change', () => {
+        if (mode.value === 'dual' && resource.rateMode !== 'dual') {
+          const single = structuredClone(resource.rate);
+          for (const rateKey of ['lowRate', 'highRate']) {
+            if (resource[rateKey].value === null && !resource[rateKey].entityId) resource[rateKey] = structuredClone(single);
+          }
+        } else if (mode.value === 'single' && resource.rateMode === 'dual' && resource.rate.value === null && !resource.rate.entityId) {
+          resource.rate = structuredClone(resource.lowRate);
+        }
+        resource.rateMode = mode.value;
+        renderRates();
+      });
+      fields.append(modeLabel, mode);
+    }
+    function renderRates() {
+      rates.replaceChildren();
+      if (!lowTitle) costRateControl(rates, singleTitle, resource.rate, unit);
+      else if (resource.rateMode === 'dual') {
+        costRateControl(rates, lowTitle, resource.lowRate, unit);
+        costRateControl(rates, highTitle, resource.highRate, unit);
+      } else costRateControl(rates, singleTitle, resource.rate, unit);
+    }
+    renderRates();
+    fields.append(rates);
     setting.append(fields);
     energyCostsSection.append(setting);
   }

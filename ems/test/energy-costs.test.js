@@ -165,6 +165,41 @@ test('laag en hoog worden apart gekoppeld voor zowel verbruik als teruglevering'
   ]);
 });
 
+test('twee tarieven rekenen afname en teruglevering met hun eigen lage en hoge prijs', () => {
+  const summary = summarizeEnergyCosts({
+    costs: { ...costs,
+      electricity: { enabled: true, rateMode: 'dual', lowRate: { source: 'manual', value: 0.2 }, highRate: { source: 'manual', value: 0.4 } },
+      feedIn: { enabled: true, rateMode: 'dual', lowRate: { source: 'manual', value: 0.05 }, highRate: { source: 'manual', value: 0.1 } },
+      gas: { ...costs.gas, enabled: false }, water: { ...costs.water, enabled: false } },
+    mappings: { electricityLow: 'sensor.import_low', electricityHigh: 'sensor.import_high',
+      electricityReturnLow: 'sensor.export_low', electricityReturnHigh: 'sensor.export_high' },
+    statistics: Object.fromEntries([['sensor.import_low', 2], ['sensor.import_high', 3], ['sensor.export_low', 4], ['sensor.export_high', 5]]
+      .map(([id, change]) => [id, [{ end: Date.parse('2026-10-15T11:00:00Z'), change }]])),
+    entities: [], now: new Date('2026-10-15T12:00:00Z'), timeZone: 'Europe/Amsterdam'
+  });
+  assert.equal(summary.resources[0].today, 1.6);
+  assert.equal(summary.resources[1].today, 0.7);
+  assert.deepEqual(summary.resources.map(resource => resource.details.map(detail => detail.price)), [[0.2, 0.4], [0.05, 0.1]]);
+});
+
+test('dynamische tweevoudige tarieven worden beide voor historie opgenomen', async () => {
+  const recorded = [];
+  await recordEnergyPrices({
+    electricity: { enabled: true, rateMode: 'dual',
+      lowRate: { source: 'entity', entityId: 'sensor.import_low_price' },
+      highRate: { source: 'entity', entityId: 'sensor.import_high_price' } },
+    feedIn: { enabled: true, rateMode: 'dual',
+      lowRate: { source: 'entity', entityId: 'sensor.export_low_price' },
+      highRate: { source: 'entity', entityId: 'sensor.export_high_price' } },
+    gas: { enabled: false, rate: { source: 'manual' } }, water: { enabled: false, rate: { source: 'manual' } }
+  }, ['import_low', 'import_high', 'export_low', 'export_high'].map((key, index) => ({
+    id: `sensor.${key}_price`, domain: 'sensor', state: String(index / 100), unit: 'EUR/kWh', available: true
+  })), { record: async (...sample) => recorded.push(sample) }, 1234);
+  assert.deepEqual(recorded.map(sample => sample[0]), [
+    'sensor.import_low_price', 'sensor.import_high_price', 'sensor.export_low_price', 'sensor.export_high_price'
+  ]);
+});
+
 test('ontbrekende maandprijzen verbergen een bekende dagopbrengst niet', () => {
   const options = {
     costs: { ...costs, electricity: { ...costs.electricity, enabled: false }, gas: { ...costs.gas, enabled: false }, water: { ...costs.water, enabled: false },

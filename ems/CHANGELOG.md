@@ -1,5 +1,9 @@
 # Changelog
 
+## Nog niet uitgebracht
+
+- Kies voor stroomverbruik en teruglevering onafhankelijk tussen één tarief of aparte lage en hoge tarieven.
+
 ## 1.0.14 - 2026-10-15
 
 - Koppel laag- en hoogtariefmeters afzonderlijk voor stroomverbruik en teruglevering; behoud oude totaalmeterkoppelingen als verborgen terugval.
