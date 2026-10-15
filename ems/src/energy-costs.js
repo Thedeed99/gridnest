@@ -5,6 +5,14 @@ const unitKey = unit => String(unit ?? '').replaceAll('³', '3').replaceAll('€
 const maxSampleAgeMs = 65 * 60 * 1000;
 const sampleIntervalMs = 55 * 60 * 1000;
 
+function electricityMeters(mappings, direction) {
+  const lowId = direction === 'return' ? mappings.electricityReturnLow : mappings.electricityLow;
+  const highId = direction === 'return' ? mappings.electricityReturnHigh : mappings.electricityHigh;
+  if (lowId || highId) return [lowId && { label: 'Laag', id: lowId }, highId && { label: 'Hoog', id: highId }].filter(Boolean);
+  const totalId = direction === 'return' ? mappings.electricityReturn : mappings.electricityConsumption;
+  return totalId ? [{ label: direction === 'return' ? 'Teruglevering' : 'Netafname', id: totalId }] : [];
+}
+
 export function validateEnergyCostPreferences(preferences, entities) {
   const rates = [
     [preferences.costs.electricity.rate, 'EUR/kWh'], [preferences.costs.feedIn?.rate, 'EUR/kWh'],
@@ -90,14 +98,10 @@ export function summarizeEnergyCosts({ costs, mappings, entities, statistics, pr
   const todayStart = localNow.startOf('day').toMillis();
   const monthStart = localNow.startOf('month').toMillis();
   const resources = [
-    { key: 'electricity', label: 'Stroom', enabled: costs.electricity.enabled, unit: 'kWh', meters: [
-      ...(mappings.electricityConsumption ? [{ label: 'Netafname', id: mappings.electricityConsumption, rate: costs.electricity.rate, priceUnit: 'EUR/kWh' }] : [
-        { label: 'Laag', id: mappings.electricityLow, rate: costs.electricity.rate, priceUnit: 'EUR/kWh' },
-        { label: 'Hoog', id: mappings.electricityHigh, rate: costs.electricity.rate, priceUnit: 'EUR/kWh' }
-      ])
-    ] },
-    { key: 'feedIn', label: 'Terugleveropbrengst', enabled: costs.feedIn?.enabled, unit: 'kWh', meters: [
-      { label: 'Teruglevering', id: mappings.electricityReturn, rate: costs.feedIn?.rate, priceUnit: 'EUR/kWh' }
+    { key: 'electricity', label: 'Stroom', enabled: costs.electricity.enabled, unit: 'kWh', rate: costs.electricity.rate, meters: electricityMeters(mappings, 'consumption')
+      .map(meter => ({ ...meter, rate: costs.electricity.rate, priceUnit: 'EUR/kWh' })) },
+    { key: 'feedIn', label: 'Terugleveropbrengst', enabled: costs.feedIn?.enabled, unit: 'kWh', rate: costs.feedIn?.rate, meters: [
+      ...electricityMeters(mappings, 'return').map(meter => ({ ...meter, rate: costs.feedIn?.rate, priceUnit: 'EUR/kWh' }))
     ] },
     { key: 'gas', label: 'Gas', enabled: costs.gas.enabled, unit: 'm³', meters: [
       { label: 'Gas', id: mappings.gasConsumption, rate: costs.gas.rate, priceUnit: 'EUR/m³' }
@@ -110,23 +114,24 @@ export function summarizeEnergyCosts({ costs, mappings, entities, statistics, pr
     today: now.toISOString(),
     resources: resources.filter(resource => resource.enabled).map(resource => {
       const details = resource.meters.filter(meter => meter.id).map(meter => {
-        const price = priceFor(meter.rate, meter.priceUnit, entities);
+        const rate = meter.rate;
+        const price = rate ? priceFor(rate, meter.priceUnit, entities) : null;
         const points = statistics[meter.id] ?? [];
         const todayUsage = meter.id ? periodUsage(points, todayStart, now.getTime()) : null;
         const monthUsage = meter.id ? periodUsage(points, monthStart, now.getTime()) : null;
-        const todayCost = meter.rate.source === 'manual'
+        const todayCost = !rate ? null : rate.source === 'manual'
           ? todayUsage === null || price === null ? null : todayUsage * price
-          : historicalCost(points, priceHistory[meter.rate.entityId] ?? [], todayStart, now.getTime());
-        const monthCost = meter.rate.source === 'manual'
+          : historicalCost(points, priceHistory[rate.entityId] ?? [], todayStart, now.getTime());
+        const monthCost = !rate ? null : rate.source === 'manual'
           ? monthUsage === null || price === null ? null : monthUsage * price
-          : historicalCost(points, priceHistory[meter.rate.entityId] ?? [], monthStart, now.getTime());
+          : historicalCost(points, priceHistory[rate.entityId] ?? [], monthStart, now.getTime());
         return { label: meter.label, price, todayUsage, monthUsage, todayCost, monthCost };
       });
       const total = key => details.length && details.every(detail => detail[key] !== null) ? details.reduce((sum, detail) => sum + detail[key], 0) : null;
       const today = total('todayCost');
       const month = total('monthCost');
-      const rate = resource.meters[0].rate;
-      const hasRate = rate.source === 'manual' ? rate.value !== null : Boolean(rate.entityId);
+      const rate = resource.rate;
+      const hasRate = rate && (rate.source === 'manual' ? rate.value !== null : Boolean(rate.entityId));
       return { key: resource.key, label: resource.label, unit: resource.unit, today, month,
         status: !details.length ? `Koppel een ${resource.unit}-meter onder Koppelingen` : !hasRate ? 'Vul een tarief in bij Mijn wensen' : today === null || month === null ? 'Tariefhistorie of meterstatistieken ontbreken' : null,
         details };
@@ -138,8 +143,8 @@ export async function readEnergyCosts(env, config, entities, now = new Date(), S
   const costs = config.preferences.costs;
   const mappings = config.mappings;
   const ids = [...new Set([
-    ...(costs.electricity.enabled ? mappings.electricityConsumption ? [mappings.electricityConsumption] : [mappings.electricityLow, mappings.electricityHigh] : []),
-    ...(costs.feedIn?.enabled ? [mappings.electricityReturn] : []),
+    ...(costs.electricity.enabled ? electricityMeters(mappings, 'consumption').map(meter => meter.id) : []),
+    ...(costs.feedIn?.enabled ? electricityMeters(mappings, 'return').map(meter => meter.id) : []),
     ...(costs.gas.enabled ? [mappings.gasConsumption] : []),
     ...(costs.water.enabled ? [mappings.waterConsumption] : [])
   ].filter(Boolean))];
@@ -150,8 +155,10 @@ export async function readEnergyCosts(env, config, entities, now = new Date(), S
     if (!localNow.isValid) throw new Error('Home Assistant-tijdzone ontbreekt of is ongeldig.');
     const metadata = await call({ type: 'recorder/get_statistics_metadata', statistic_ids: ids });
     if (!Array.isArray(metadata)) throw new Error('Ongeldige meterstatistiekmetadata.');
-    const unitClass = new Map([[mappings.electricityConsumption, 'energy'], [mappings.electricityReturn, 'energy'], [mappings.electricityLow, 'energy'], [mappings.electricityHigh, 'energy'],
-      [mappings.gasConsumption, 'volume'], [mappings.waterConsumption, 'volume']]);
+    const unitClass = new Map([
+      ...[...electricityMeters(mappings, 'consumption'), ...electricityMeters(mappings, 'return')].map(meter => [meter.id, 'energy']),
+      [mappings.gasConsumption, 'volume'], [mappings.waterConsumption, 'volume']
+    ]);
     const validIds = metadata.filter(item => item.has_sum && item.unit_class === unitClass.get(item.statistic_id)).map(item => item.statistic_id);
     const statistics = validIds.length ? await call({ type: 'recorder/statistics_during_period',
       start_time: localNow.startOf('month').toUTC().toISO(), end_time: now.toISOString(), statistic_ids: validIds,
@@ -168,11 +175,13 @@ export function demoEnergyCosts(config, entities, now = new Date()) {
   const values = {
     electricityConsumption: [223, 7.6], electricityReturn: [80, 3.2],
     electricityLow: [125, 4.2], electricityHigh: [98, 3.4],
+    electricityReturnLow: [35, 1.4], electricityReturnHigh: [45, 1.8],
     gasConsumption: [14.5, 0.7], waterConsumption: [4.8, 0.18]
   };
   const mappingIds = {
     electricityConsumption: config.mappings.electricityConsumption, electricityReturn: config.mappings.electricityReturn,
     electricityLow: config.mappings.electricityLow, electricityHigh: config.mappings.electricityHigh,
+    electricityReturnLow: config.mappings.electricityReturnLow, electricityReturnHigh: config.mappings.electricityReturnHigh,
     gasConsumption: config.mappings.gasConsumption, waterConsumption: config.mappings.waterConsumption
   };
   const statistics = {};
