@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.12 - 2026-10-15
+
+- Bewaar gekoppelde prijssensoren lokaal en bereken dynamische energiekosten per uur, vandaag, deze maand en over de afgelopen 30 dagen.
+- Markeer ontbrekende tariefhistorie als onvolledig; behoud handmatige vaste tarieven.
+
 ## 1.0.11 - 2026-10-15
 
 - Voeg een optioneel kostenoverzicht voor stroom, gas en water toe met handmatige tarieven of prijsentiteiten.

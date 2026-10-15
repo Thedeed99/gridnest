@@ -12,7 +12,8 @@ import { createRuleRunner } from './rule-runner.js';
 import { demoUtilityHistory, readUtilityHistory } from './gas.js';
 import { dailyEnergyRecap, demoDailyRecap, recapMeters, readDailyRecap } from './daily-recap.js';
 import { readOfficialEnergy } from './energy-statistics.js';
-import { demoEnergyCosts, readEnergyCosts, validateEnergyCostPreferences } from './energy-costs.js';
+import { demoEnergyCosts, readEnergyCosts, recordEnergyPrices, validateEnergyCostPreferences } from './energy-costs.js';
+import { createPriceHistory } from './price-history.js';
 import { cumulativeSolarToday, isCumulativeSolarMeter, readSolarMeterToday } from './solar-meter.js';
 
 export function createApp({ store, entitiesProvider, demo = false, supervisor = false, runner = null,
@@ -340,7 +341,9 @@ export async function startServer(env = process.env) {
   if (demo && (env.SUPERVISOR_TOKEN || env.HA_TOKEN)) throw new Error('Demomodus en echte toegangssleutels mogen niet gecombineerd worden.');
   const supervisor = Boolean(env.SUPERVISOR_TOKEN);
   const controlEnv = { ...env, CONTROL_ENABLED: supervisor && env.CONTROL_ENABLED === 'true' ? 'true' : 'false' };
-  const store = await createStore(env.DATA_DIR || fileURLToPath(new URL('../data/', import.meta.url)), demo ? 'demo' : 'home-assistant');
+  const dataDirectory = env.DATA_DIR || fileURLToPath(new URL('../data/', import.meta.url));
+  const store = await createStore(dataDirectory, demo ? 'demo' : 'home-assistant');
+  const priceHistory = await createPriceHistory(dataDirectory);
   const entitiesProvider = demo ? async () => ({ connected: false, entities: demoEntities(), message: 'Voorbeeldwoning · geen echte verbinding' }) : () => readEntities(env);
   const utilityHistoryProvider = demo ? async (_entityId, utility) => demoUtilityHistory(utility) : entityId => readUtilityHistory(env, entityId);
   const dailyRecapProvider = demo
@@ -350,7 +353,7 @@ export async function startServer(env = process.env) {
   const officialRecapProvider = demo ? async () => null : mappings => readOfficialEnergy(env, mappings);
   const energyCostsProvider = demo
     ? (config, entities) => demoEnergyCosts(config, entities)
-    : (config, entities) => readEnergyCosts(env, config, entities);
+    : (config, entities) => readEnergyCosts(env, config, entities, new Date(), WebSocket, priceHistory.all());
   const solarTodayProvider = async (entityId, mode) => {
     const now = new Date();
     const entity = (await entitiesProvider()).entities.find(item => item.id === entityId);
@@ -367,8 +370,28 @@ export async function startServer(env = process.env) {
     activeAllowed: supervisor && controlEnv.CONTROL_ENABLED === 'true' && !demo,
     execute: command => executeRuleCommand(command, controlEnv) });
   const app = createApp({ store, demo, supervisor, entitiesProvider, runner, utilityHistoryProvider, dailyRecapProvider, officialRecapProvider, solarTodayProvider, energyCostsProvider, batterySwitchProvider, solarLimitProvider, evCommandProvider, consumerSwitchProvider });
+  let priceCapture;
+  const capturePrices = async () => {
+    if (priceCapture) return priceCapture;
+    priceCapture = (async () => {
+      try {
+        const connection = await entitiesProvider();
+        await recordEnergyPrices(store.get().preferences.costs, connection.entities ?? [], priceHistory);
+      } catch {}
+    })();
+    try { await priceCapture; }
+    finally { priceCapture = null; }
+  };
   const server = app.listen(8080, env.HOST || (supervisor ? '0.0.0.0' : '127.0.0.1'), () => {
     runner.start();
+    void capturePrices();
+    const priceTimer = setInterval(() => { void capturePrices(); }, 60_000);
+    priceTimer.unref();
+    server.once('close', async () => {
+      clearInterval(priceTimer);
+      await priceCapture;
+      await priceHistory.close();
+    });
     const mode = demo ? 'demo' : runner.status().activeAllowed ? 'sturing toegestaan' : 'regels standaard uit';
     console.log(`Gridnest beschikbaar op poort 8080 (${mode}).`);
   });
