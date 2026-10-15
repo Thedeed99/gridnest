@@ -293,50 +293,37 @@ function currency(value) {
 
 function renderEnergyCosts(container, summary) {
   const resources = summary.resources;
-  const complete = resources.length > 0 && resources.every(resource => resource.status === null);
-  const today = complete ? resources.reduce((total, resource) => total + resource.today, 0) : null;
-  const month = complete ? resources.reduce((total, resource) => total + resource.month, 0) : null;
-  const days30 = complete ? resources.reduce((total, resource) => total + resource.days30, 0) : null;
-  container.querySelector('[data-cost-today]').textContent = complete ? currency(today) : 'Onvolledig';
-  container.querySelector('[data-cost-month]').textContent = complete ? currency(month) : 'Onvolledig';
-  container.querySelector('[data-cost-days30]').textContent = complete ? currency(days30) : 'Onvolledig';
+  const total = period => resources.length && resources.every(resource => Number.isFinite(resource[period]))
+    ? resources.reduce((sum, resource) => sum + (resource.key === 'feedIn' ? -1 : 1) * resource[period], 0) : null;
+  for (const period of ['today', 'month']) container.querySelector(`[data-cost-${period}]`).textContent = total(period) === null ? 'Onvolledig' : currency(total(period));
   const content = container.querySelector('.energy-costs-content');
   content.replaceChildren();
   const headings = element('div', 'energy-cost-row energy-cost-headings');
-  headings.append(element('span', '', 'Verbruik'), element('span', '', 'Vandaag'), element('span', '', 'Deze maand'), element('span', '', '30 dagen'));
+  headings.append(element('span', '', 'Financieel'), element('span', '', 'Vandaag'), element('span', '', 'Deze maand'));
   content.append(headings);
   for (const resource of summary.resources) {
     const row = element('div', 'energy-cost-row');
     row.append(element('strong', '', resource.label));
-    if (resource.status) {
-      const status = element('span', 'energy-cost-status', resource.status);
-      status.title = resource.details.map(detail => `${detail.label}: ${detail.price === null ? 'tarief ontbreekt' : currency(detail.price)}`).join(' · ');
-      row.append(status);
-    } else {
-      row.append(element('span', '', currency(resource.today)), element('span', '', currency(resource.month)), element('span', '', currency(resource.days30)));
-    }
+    row.append(element('span', '', currency(resource.today)), element('span', '', currency(resource.month)));
     content.append(row);
-    if (resource.key === 'electricity' && resource.details.length) {
-      const breakdown = element('details', 'energy-cost-breakdown');
-      breakdown.append(element('summary', '', 'Laag/hoog uitsplitsing'));
-      for (const detail of resource.details) {
-        const detailRow = element('div', 'energy-cost-detail');
-        detailRow.append(element('span', '', detail.label), element('span', '', currency(detail.todayCost)), element('span', '', currency(detail.monthCost)), element('span', '', currency(detail.days30Cost)));
-        breakdown.append(detailRow);
-      }
-      content.append(breakdown);
+    if (resource.status) {
+      const status = element('p', 'energy-cost-status', `${resource.label}: ${resource.status}`);
+      content.append(status);
     }
   }
+  const net = element('div', 'energy-cost-row energy-cost-net');
+  net.append(element('strong', '', 'Saldo kosten'), element('strong', '', currency(total('today'))), element('strong', '', currency(total('month'))));
+  content.append(net);
 }
 
 function energyCostsPanel() {
   const panel = element('details', 'energy-costs-panel');
   const summary = element('summary', 'energy-costs-summary');
-  summary.append(element('strong', 'energy-costs-summary-title', 'Kosten'));
-  for (const [key, title] of [['today', 'Vandaag'], ['month', 'Deze maand'], ['days30', '30 dagen']]) {
+  summary.append(element('strong', 'energy-costs-summary-title', 'Financieel'));
+  for (const [key, title] of [['today', 'Vandaag'], ['month', 'Deze maand']]) {
     const amount = element('span', 'energy-costs-summary-amount');
     amount.append(element('small', '', title), element('strong', '', 'Laden…'));
-    amount.lastElementChild.dataset[`cost${key === 'today' ? 'Today' : key === 'month' ? 'Month' : 'Days30'}`] = '';
+    amount.lastElementChild.dataset[`cost${key === 'today' ? 'Today' : 'Month'}`] = '';
     summary.append(amount);
   }
   const disclosure = element('span', 'energy-cost-chevron');
@@ -2381,9 +2368,10 @@ function preferences() {
   }
   form.append(utilitySection);
   const energyCostsSection = element('section', 'preference-section energy-cost-settings');
-  energyCostsSection.append(element('h2', '', 'Kostenoverzicht'), element('p', 'subtitle', 'Kies welke kosten op de startpagina verschijnen. Schakel uit om een kostensoort te verbergen.'));
+  energyCostsSection.append(element('h2', '', 'Financieel'));
   preferencesDraft.costs ??= {
-    electricity: { enabled: false, lowRate: { source: 'manual', value: null, entityId: null }, highRate: { source: 'manual', value: null, entityId: null } },
+    electricity: { enabled: false, rate: { source: 'manual', value: null, entityId: null } },
+    feedIn: { enabled: false, rate: { source: 'manual', value: null, entityId: null } },
     gas: { enabled: false, rate: { source: 'manual', value: null, entityId: null } },
     water: { enabled: false, rate: { source: 'manual', value: null, entityId: null } }
   };
@@ -2403,7 +2391,7 @@ function preferences() {
     const manualLabel = element('label', 'mapping-setting');
     manualLabel.append(element('span', '', `Prijs (${unit})`));
     const manual = element('input', 'text-input');
-    manual.type = 'number'; manual.min = '0'; manual.max = '100'; manual.step = '0.0001';
+    manual.type = 'number'; manual.min = '0'; manual.max = '100'; manual.step = '0.000001';
     manual.value = rate.value ?? '';
     manual.addEventListener('input', () => { rate.value = manual.value === '' ? null : Number(manual.value); });
     manualLabel.append(manual);
@@ -2434,7 +2422,8 @@ function preferences() {
     parent.append(rateFields);
   }
   for (const [key, title, rates] of [
-    ['electricity', 'Stroom', [['Laag tarief', 'lowRate', '€/kWh'], ['Hoog tarief', 'highRate', '€/kWh']]],
+    ['electricity', 'Stroom', [['All-in stroomtarief', 'rate', '€/kWh']]],
+    ['feedIn', 'Terugleveropbrengst', [['Terugleververgoeding', 'rate', '€/kWh']]],
     ['gas', 'Gas', [['Gasprijs', 'rate', '€/m³']]],
     ['water', 'Water', [['Waterprijs', 'rate', '€/m³']]]
   ]) {
@@ -2446,7 +2435,6 @@ function preferences() {
     enabled.addEventListener('change', () => { resource.enabled = enabled.checked; fields.hidden = !enabled.checked; });
     label.append(enabled, element('strong', '', `${title} opnemen in overzicht`));
     setting.append(label);
-    if (key === 'electricity') fields.append(element('p', 'muted', 'Koppel laag- en hoogtariefmeters onder Koppelingen om beide tarieven apart te berekenen.'));
     for (const [rateTitle, rateKey, unit] of rates) costRateControl(fields, rateTitle, resource[rateKey], unit);
     setting.append(fields);
     energyCostsSection.append(setting);

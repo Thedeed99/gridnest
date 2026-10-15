@@ -188,4 +188,7 @@ test('laag- en hoogtarief accepteren alleen verschillende cumulatieve kWh-meters
   assert.equal(mappings.electricityHigh, 'sensor.high_total');
   assert.throws(() => validateMappings({ ...emptyMappings, electricityLow: 'sensor.session' }, entities), /cumulatieve/);
   assert.throws(() => validateMappings({ ...emptyMappings, electricityLow: 'sensor.low_total', electricityHigh: 'sensor.low_total' }, entities), /afzonderlijke/);
+  assert.equal(validateMappings({ ...emptyMappings, electricityConsumption: 'sensor.low_total', electricityReturn: 'sensor.high_total' }, entities).electricityReturn, 'sensor.high_total');
+  assert.throws(() => validateMappings({ ...emptyMappings, electricityReturn: 'sensor.session' }, entities), /cumulatieve/);
+  assert.throws(() => validateMappings({ ...emptyMappings, electricityConsumption: 'sensor.low_total', electricityReturn: 'sensor.low_total' }, entities), /afzonderlijke/);
 });

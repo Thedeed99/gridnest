@@ -1,5 +1,11 @@
 # Changelog
 
+## Nog niet uitgebracht
+
+- Hernoem Kosten naar Financieel met vandaag en deze maand, terugleveropbrengsten en saldo kosten.
+- Vereenvoudig stroom naar één all-in kWh-tarief en ondersteun handmatige prijzen tot zes decimalen.
+- Voeg totale afname- en teruglevermeters toe; geef concreet aan welke meter, welk tarief of welke historie ontbreekt en behoud bekende dagbedragen bij ontbrekende maandprijzen.
+
 ## 1.0.12 - 2026-10-15
 
 - Bewaar gekoppelde prijssensoren lokaal en bereken dynamische energiekosten per uur, vandaag, deze maand en over de afgelopen 30 dagen.
