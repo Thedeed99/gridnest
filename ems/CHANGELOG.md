@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.1 - 2026-10-19
+
+- Vervang technische JSON-fouten bij tijdelijke proxy- of verbindingsstoringen door begrijpelijke meldingen.
+- Toon bij automatisch verversen pas na vijf opeenvolgende fouten een melding; herstel zet de foutenteller terug op nul.
+- Voorkom herhaalde popups tijdens dezelfde storing; handmatig vernieuwen geeft direct feedback.
+- Begrens API-verzoeken op 15 seconden zonder apparaatopdrachten automatisch te herhalen.
+
 ## 2.0.0 - 2026-10-15
 
 - Herstel het direct opnieuw tonen van het thema-icoon na wisselen tussen licht en donker.
