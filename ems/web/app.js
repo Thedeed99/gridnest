@@ -32,6 +32,7 @@ let search = '';
 let loading = false;
 let refreshTimer;
 let refreshSeconds;
+let consecutiveRefreshFailures = 0;
 let noticeTimeout;
 let utilityCharts = [];
 const utilityHistoryCache = {};
@@ -119,12 +120,7 @@ function notify(message, error = false) {
   noticeTimeout = setTimeout(() => { notice.hidden = true; }, 5000);
 }
 
-async function api(path, options = {}) {
-  const response = await fetch(`./api/${path}`, options);
-  const body = await response.json();
-  if (!response.ok) throw new Error(body.error || 'Verzoek mislukt.');
-  return body;
-}
+import { api } from './api.js';
 function syncDeviceNavigation() {
   const rules = data.control?.rules ?? [];
   const hasEv = data.mappings.evMode !== 'none' && Boolean(['evPower', 'evSoc', 'evEnergyTotal', 'evEnable', 'evCurrentLimit', 'evCableStatus', 'evLockStatus', 'evSessionEnergy', 'evPhase1Current', 'evPhase2Current', 'evPhase3Current'].some(role => data.mappings[role]) || rules.some(rule => ['ev_enable', 'ev_current'].includes(rule.action.type)));
@@ -161,6 +157,7 @@ async function refresh(showButtonProgress = false) {
   if (showButtonProgress) refreshButton.disabled = true;
   try {
     data = await api('bootstrap');
+    consecutiveRefreshFailures = 0;
     setRefreshInterval(data.preferences.refreshSeconds ?? 10);
     const previousView = view;
     syncDeviceNavigation();
@@ -192,12 +189,17 @@ async function refresh(showButtonProgress = false) {
       }
     }
   } catch (error) {
-    document.querySelector('#connection').textContent = 'Verbinding met EMS verbroken';
+    consecutiveRefreshFailures += 1;
+    const connection = document.querySelector('#connection');
+    connection.textContent = consecutiveRefreshFailures >= 5 || !data
+      ? 'Verbinding met EMS verbroken'
+      : 'Metingen tijdelijk niet vernieuwd';
+    connection.className = 'offline-status';
     if (!data) {
       main.setAttribute('aria-busy', 'false');
       main.replaceChildren(element('h1', '', 'Verbinding niet beschikbaar'), element('p', '', 'Metingen kunnen niet worden opgehaald.'));
     }
-    notify(error.message, true);
+    if (consecutiveRefreshFailures === 5 || showButtonProgress) notify(error.message, true);
   } finally {
     loading = false;
     if (showButtonProgress) refreshButton.disabled = false;
