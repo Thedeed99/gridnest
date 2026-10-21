@@ -8,6 +8,33 @@ const costs = {
   water: { enabled: true, rate: { source: 'entity', value: null, entityId: 'sensor.water_rate' } }
 };
 
+test('laadkosten worden uitgesplitst zonder ze bij de totale stroomkosten op te tellen', () => {
+  const options = {
+    costs, mappings: { electricityConsumption: 'sensor.import', evEnergyTotal: 'sensor.ev' }, entities: [],
+    statistics: {
+      'sensor.import': [{ end: Date.parse('2026-10-15T11:00:00Z'), change: 10 }],
+      'sensor.ev': [{ end: Date.parse('2026-10-02T11:00:00Z'), change: 5 }, { end: Date.parse('2026-10-15T11:00:00Z'), change: 3 }]
+    }, now: new Date('2026-10-15T12:00:00Z'), timeZone: 'Europe/Amsterdam'
+  };
+  const summary = summarizeEnergyCosts(options);
+  assert.deepEqual(summary.resources.map(resource => resource.key), ['electricity', 'gas', 'water']);
+  assert.equal(summary.resources[0].today, 2);
+  const charging = summary.resources[0].breakdown[0];
+  assert.equal(charging.today, 3 * 0.2);
+  assert.equal(charging.month, 8 * 0.2);
+  assert.equal(charging.status, null);
+  assert.equal(summarizeEnergyCosts({ ...options, mappings: {} }).resources[0].breakdown, undefined);
+  const missing = summarizeEnergyCosts({ ...options, statistics: {} }).resources[0].breakdown[0];
+  assert.equal(missing.today, null);
+  const zero = summarizeEnergyCosts({ ...options, statistics: { 'sensor.ev': [{ end: Date.parse('2026-10-15T11:00:00Z'), change: 0 }] } }).resources[0].breakdown[0];
+  assert.equal(zero.today, 0);
+  const noMeter = summarizeEnergyCosts({ ...options, mappings: { evPower: 'sensor.ev_power' } }).resources[0].breakdown[0];
+  assert.match(noMeter.status, /laadpaal-energiemeter/);
+  const dual = summarizeEnergyCosts({ ...options, costs: { ...costs, electricity: { ...costs.electricity, rateMode: 'dual' } } }).resources[0].breakdown[0];
+  assert.equal(dual.today, null);
+  assert.match(dual.status, /laag\/hoog/);
+});
+
 test('één all-in tarief geldt voor laag/hoog naast gas en water voor vandaag en deze maand', () => {
   const now = new Date('2026-10-15T12:00:00Z');
   const summary = summarizeEnergyCosts({
@@ -99,11 +126,11 @@ test('prijssensoren moeten de juiste euro-eenheid hebben', () => {
   ]), /EUR\/kWh/);
 });
 
-test('Home Assistant vraagt alleen statistieken op voor gekoppelde verbruiks- en teruglevermeters', async () => {
+test('Home Assistant vraagt alleen statistieken op voor gekoppelde verbruiks-, laad- en teruglevermeters', async () => {
   const now = new Date('2026-10-15T12:00:00Z');
   const config = {
     mappings: { electricityLow: 'sensor.low', electricityHigh: null, electricityReturnLow: 'sensor.return_low', electricityReturnHigh: null,
-      gasConsumption: 'sensor.gas', waterConsumption: null },
+      gasConsumption: 'sensor.gas', waterConsumption: null, evEnergyTotal: 'sensor.ev' },
     preferences: { costs: {
       electricity: { enabled: true, rate: { source: 'manual', value: 0.2 } },
       feedIn: { enabled: true, rate: { source: 'manual', value: 0.1 } },
@@ -122,7 +149,7 @@ test('Home Assistant vraagt alleen statistieken op voor gekoppelde verbruiks- en
       let result;
       if (command.type === 'get_config') result = { time_zone: 'Europe/Amsterdam' };
       if (command.type === 'recorder/get_statistics_metadata') result = command.statistic_ids.map(statistic_id => ({ statistic_id, has_sum: true,
-        unit_class: ['sensor.low', 'sensor.return_low'].includes(statistic_id) ? 'energy' : 'volume' }));
+        unit_class: ['sensor.low', 'sensor.return_low', 'sensor.ev'].includes(statistic_id) ? 'energy' : 'volume' }));
       if (command.type === 'recorder/statistics_during_period') {
         requestedIds = command.statistic_ids;
         requestedStartTime = command.start_time;
@@ -133,9 +160,28 @@ test('Home Assistant vraagt alleen statistieken op voor gekoppelde verbruiks- en
     close() {}
   }
   const result = await readEnergyCosts({ SUPERVISOR_TOKEN: 'test-token' }, config, [], now, FakeSocket);
-  assert.deepEqual(requestedIds, ['sensor.low', 'sensor.return_low', 'sensor.gas']);
+  assert.deepEqual(requestedIds, ['sensor.low', 'sensor.ev', 'sensor.return_low', 'sensor.gas']);
   assert.equal(requestedStartTime, '2026-09-30T22:00:00.000Z');
   assert.deepEqual(result.resources.map(resource => [resource.key, Number(resource.today.toFixed(3))]), [['electricity', 0.4], ['feedIn', 0.3], ['gas', 0.625]]);
+  assert.equal(result.resources[0].breakdown[0].today, 0.1);
+});
+
+test('laadkosten volgen historische dynamische prijzen en blijven onbekend bij ontbrekende prijzen', () => {
+  const options = {
+    costs: { ...costs, electricity: { enabled: true, interval: 'hour', rate: { source: 'entity', entityId: 'sensor.price' } } },
+    mappings: { evEnergyTotal: 'sensor.ev' }, entities: [],
+    statistics: { 'sensor.ev': [
+      { start: Date.parse('2026-10-15T08:00:00Z'), end: Date.parse('2026-10-15T09:00:00Z'), change: 2 },
+      { start: Date.parse('2026-10-15T09:00:00Z'), end: Date.parse('2026-10-15T10:00:00Z'), change: 3 }
+    ] },
+    priceHistory: { 'sensor.price': [
+      { at: Date.parse('2026-10-15T08:00:00Z'), value: 0.4 },
+      { at: Date.parse('2026-10-15T09:00:00Z'), value: -0.1 }
+    ] }, now: new Date('2026-10-15T12:00:00Z'), timeZone: 'Europe/Amsterdam'
+  };
+  assert.equal(summarizeEnergyCosts(options).resources[0].breakdown[0].today, 0.5);
+  assert.equal(summarizeEnergyCosts({ ...options, priceHistory: {} }).resources[0].breakdown[0].today, null);
+  assert.equal(summarizeEnergyCosts({ ...options, costs: { ...costs, electricity: { ...costs.electricity, enabled: false } } }).resources.some(resource => resource.breakdown), false);
 });
 
 test('zes decimalen blijven behouden en oude totaalmeter werkt als terugval', () => {

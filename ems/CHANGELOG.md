@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.2 - 2026-10-21
+
+- Splits in Financieel de laadkosten van de auto uit voor vandaag en deze maand, op basis van de cumulatieve laadpaalmeter en het enkele stroomtarief, zonder het saldo dubbel te verhogen.
+- Geef ontbrekende laadmetingen, prijshistorie of laag/hoog-verdeling expliciet aan.
+
 ## 2.0.1 - 2026-10-19
 
 - Vervang technische JSON-fouten bij tijdelijke proxy- of verbindingsstoringen door begrijpelijke meldingen.
