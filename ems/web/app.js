@@ -315,6 +315,13 @@ function renderEnergyCosts(container, summary) {
       const status = element('p', 'energy-cost-status', `${resource.label}: ${resource.status}`);
       content.append(status);
     }
+    for (const detail of resource.breakdown ?? []) {
+      const breakdown = element('div', 'energy-cost-row energy-cost-breakdown');
+      breakdown.title = 'Laadenergie tegen het ingestelde stroomtarief, inclusief eventuele eigen zonnestroom. Niet extra opgeteld bij het saldo.';
+      breakdown.append(element('span', '', detail.label), element('span', '', currency(detail.today)), element('span', '', currency(detail.month)));
+      content.append(breakdown);
+      if (detail.status) content.append(element('p', 'energy-cost-status', `${detail.label}: ${detail.status}`));
+    }
   }
   const net = element('div', 'energy-cost-row energy-cost-net');
   net.append(element('strong', '', 'Saldo kosten'), element('strong', '', currency(total('today'))), element('strong', '', currency(total('month'))));
