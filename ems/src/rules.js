@@ -14,6 +14,7 @@ export const actionTypes = [
 
 const entityId = z.string().regex(/^[a-z_]+\.[a-z0-9_]+$/);
 const actionValue = z.union([z.number().finite(), z.enum(['on', 'off', 'heat'])]);
+const otherwiseValue = z.union([actionValue, z.literal('keep')]);
 export const rulesSchema = z.object({
   mode: z.enum(['off', 'preview', 'active']).default('off'),
   maxAgeSeconds: z.number().int().min(60).max(86400).default(900),
@@ -24,6 +25,7 @@ export const rulesSchema = z.object({
   rules: z.array(z.object({
     id: z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/), name: z.string().trim().min(1).max(80),
     priority: z.number().int().min(1).max(100).default(50),
+    delayMinutes: z.number().int().min(0).max(1440).default(0),
     enabled: z.boolean().default(false), confirmed: z.boolean().default(false),
     conditions: z.array(z.object({
       entityId,
@@ -31,7 +33,7 @@ export const rulesSchema = z.object({
       value: z.union([z.number().finite(), z.enum(['on', 'off']), z.string().trim().max(80)]),
       forMinutes: z.number().min(0).max(1440).default(0)
     }).strict()).min(1).max(5),
-    action: z.object({ type: z.enum(actionTypes.map(type => type.id)), entityId, value: actionValue, otherwise: actionValue, batteryDirection: z.enum(['positive-charge', 'positive-discharge']).default('positive-charge') }).strict(),
+    action: z.object({ type: z.enum(actionTypes.map(type => type.id)), entityId, value: actionValue, otherwise: otherwiseValue, batteryDirection: z.enum(['positive-charge', 'positive-discharge']).default('positive-charge') }).strict(),
     notification: z.object({
       enabled: z.boolean().default(false),
       targetPerson: z.string().trim().max(80).nullable().default(null),
@@ -46,6 +48,7 @@ export const rulesSchema = z.object({
   if (new Set(bindings).size !== bindings.length) context.addIssue({ code: 'custom', message: 'Gebruik een regel per bedieningswaarde om tegenstrijdige opdrachten te voorkomen.' });
   for (const rule of settings.rules) {
     for (const value of [rule.action.value, rule.action.otherwise]) {
+      if (value === 'keep') continue;
       const type = rule.action.type;
       const valid = ['ev_enable', 'battery_enable', 'switch_control'].includes(type) ? ['on', 'off'].includes(value) : type === 'climate_mode' ? ['heat', 'off'].includes(value) :
         typeof value === 'number' && (type === 'climate_temperature' ? value >= 12 && value <= 26 : type === 'ev_current' ? value >= 6 && value <= 32 : ['pv_limit', 'battery_soc_limit'].includes(type) ? value >= 0 && value <= 100 : Math.abs(value) <= 10000);
@@ -136,9 +139,21 @@ export function planRules({ settings, entities, mappings, temperatureUnit, now =
       }
       match = match && condMatch;
     }
+    const delayKey = `${rule.id}:delay`;
+    let waitingReason = '';
+    if (!match || !rule.delayMinutes) ruleMemory.delete(delayKey);
+    else {
+      if (!ruleMemory.has(delayKey)) ruleMemory.set(delayKey, now);
+      const remaining = rule.delayMinutes * 60000 - (now - ruleMemory.get(delayKey));
+      if (remaining > 0) { match = false; waitingReason = ` Wachttijd loopt: nog ${Math.ceil(remaining / 60000)} min tot de dan-actie.`; }
+    }
     const action = rule.action;
     const entity = entities.find(entity => entity.id === action.entityId);
     if (!entity?.available || entity.domain !== actionTypes.find(type => type.id === action.type).domain) return blocked('Bedieningsentiteit ontbreekt of is niet beschikbaar.');
+    if (!match && action.otherwise === 'keep') {
+      const observed = action.type === 'climate_temperature' ? entity.targetTemperature : entity.domain === 'number' ? Number(entity.state) : entity.state;
+      return { ...result, status: 'stable', matched: false, observed, reason: `Anders: niets doen.${waitingReason}`, command: null };
+    }
     let value = match ? action.value : action.otherwise;
     let service;
     let observed;
@@ -179,7 +194,7 @@ export function planRules({ settings, entities, mappings, temperatureUnit, now =
     };
     if (command && rule.notification?.enabled) command.notification = rule.notification;
     return { ...result, status: equal ? 'stable' : 'planned', matched: match, observed,
-      reason: `${match ? 'Als' : 'Anders'}: ${equal ? 'doelwaarde al ingesteld' : 'doelwaarde aanpassen'}.`,
+      reason: `${match ? 'Als' : 'Anders'}: ${equal ? 'doelwaarde al ingesteld' : 'doelwaarde aanpassen'}.${waitingReason}`,
       command };
   });
 }

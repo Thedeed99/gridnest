@@ -1723,12 +1723,13 @@ function rulesView() {
     const conditions = rule.conditions.map(condition => { const entity = data.entities.find(entity => entity.id === condition.entityId); return `${entity?.name ?? condition.entityId} ${operators[condition.operator]} ${condition.value}${entity?.unit ? ` ${entity.unit}` : ''}`; });
     const type = data.actionTypes.find(type => type.id === rule.action.type);
     const actuator = data.entities.find(entity => entity.id === rule.action.entityId);
-    const actionLabel = value => type.id === 'ev_enable' ? value === 'on' ? 'laden toestaan' : 'laden stoppen'
+    const actionLabel = value => value === 'keep' ? 'niets doen'
+      : type.id === 'ev_enable' ? value === 'on' ? 'laden toestaan' : 'laden stoppen'
       : type.id === 'battery_enable' ? value === 'on' ? 'inschakelen / bijladen' : 'uitschakelen'
       : type.id === 'climate_mode' ? value === 'heat' ? 'verwarmmodus' : 'uitmodus'
       : type.id === 'battery_soc_limit' ? `${number(value)} %`
       : `${number(value)}${type.unit ? ` ${type.unit}` : ''}`;
-    row.append(title, element('p', 'rule-summary', `Als ${conditions.join(' én ')}`), element('p', 'rule-summary', `Dan ${actionLabel(rule.action.value)} · anders ${actionLabel(rule.action.otherwise)}`), element('p', 'muted', `${type.name} · ${actuator?.name ?? rule.action.entityId}`));
+    row.append(title, element('p', 'rule-summary', `Als ${conditions.join(' én ')}`), element('p', 'rule-summary', `Dan ${rule.delayMinutes ? `na ${rule.delayMinutes} min wachten ` : ''}${actionLabel(rule.action.value)} · anders ${actionLabel(rule.action.otherwise)}`), element('p', 'muted', `${type.name} · ${actuator?.name ?? rule.action.entityId}`));
     list.append(row);
   }
   if (!data.control.rules.length) list.append(element('p', 'empty-state', 'Nog geen regels.'));
@@ -1904,6 +1905,11 @@ function editRule(id = null, presetType = 'ev_enable') {
     createIcons({ icons });
   }
   renderConditions();
+  const delay = element('input', 'text-input');
+  Object.assign(delay, { type: 'number', min: 0, max: 1440, step: 1, required: true, value: draft.delayMinutes ?? 0 });
+  delay.addEventListener('input', () => { draft.delayMinutes = delay.value === '' ? null : Number(delay.value); });
+  field(fields, 'Wachttijd voordat de dan-actie start (minuten)', delay, 'rule-delay');
+  fields.append(element('p', 'muted', 'De voorwaarden moeten de hele wachttijd onafgebroken kloppen. Voorbeeld: verbruik groter dan 10 W, wacht 30 minuten, dan uitschakelen en anders niets doen.'));
   const availableTypes = data.actionTypes;
   const type = select(availableTypes.map(type => [type.id, type.name]), draft.action.type);
   field(fields, 'Actie', type, 'rule-type');
@@ -1918,11 +1924,12 @@ function editRule(id = null, presetType = 'ev_enable') {
     entityPicker(actionFields, 'Bediening', 'rule-actuator', candidates, draft.action.entityId, selected => { draft.action.entityId = selected; draft.confirmed = false; confirmed.checked = false; });
     for (const [key, title] of [['value', 'Dan'], ['otherwise', 'Anders']]) {
       const binary = ['ev_enable', 'battery_enable', 'switch_control', 'climate_mode'].includes(actionType.id);
+      const keep = key === 'otherwise' ? [['keep', 'Niets doen']] : [];
       const value = binary ? select(
-        actionType.id === 'ev_enable' ? [['on', 'Laden toestaan'], ['off', 'Laden stoppen']]
-        : actionType.id === 'battery_enable' ? [['on', 'Inschakelen / bijladen'], ['off', 'Uitschakelen / niet bijladen']]
-        : actionType.id === 'switch_control' ? [['on', 'Inschakelen'], ['off', 'Uitschakelen']]
-        : [['heat', 'Verwarmmodus'], ['off', 'Uitmodus']],
+        actionType.id === 'ev_enable' ? [['on', 'Laden toestaan'], ['off', 'Laden stoppen'], ...keep]
+        : actionType.id === 'battery_enable' ? [['on', 'Inschakelen / bijladen'], ['off', 'Uitschakelen / niet bijladen'], ...keep]
+        : actionType.id === 'switch_control' ? [['on', 'Inschakelen'], ['off', 'Uitschakelen'], ...keep]
+        : [['heat', 'Verwarmmodus'], ['off', 'Uitmodus'], ...keep],
         draft.action[key]
       ) : element('input', 'text-input');
       if (!binary) Object.assign(value, { type: 'number', step: 'any', required: true, value: draft.action[key] });

@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.3 - 2026-10-27
+
+- Stroomregels krijgen een wachttijd: de dan-actie start pas als de voorwaarden het opgegeven aantal minuten onafgebroken kloppen (bijvoorbeeld verbruik boven 10 W, 30 minuten wachten, dan uitschakelen).
+- Nieuwe anders-keuze "Niets doen" voor aan/uit-acties, zodat een apparaat dat je zelf weer aanzet niet wordt tegengewerkt of gepauzeerd.
+
 ## 2.0.2 - 2026-10-21
 
 - Splits in Financieel de laadkosten van de auto uit voor vandaag en deze maand, op basis van de cumulatieve laadpaalmeter en het enkele stroomtarief, zonder het saldo dubbel te verhogen.
