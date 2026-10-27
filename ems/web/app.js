@@ -1725,6 +1725,7 @@ function rulesView() {
     const actuator = data.entities.find(entity => entity.id === rule.action.entityId);
     const actionLabel = value => value === 'keep' ? 'niets doen'
       : type.id === 'ev_enable' ? value === 'on' ? 'laden toestaan' : 'laden stoppen'
+      : type.id === 'switch_control' ? value === 'on' ? 'inschakelen' : 'uitschakelen'
       : type.id === 'battery_enable' ? value === 'on' ? 'inschakelen / bijladen' : 'uitschakelen'
       : type.id === 'climate_mode' ? value === 'heat' ? 'verwarmmodus' : 'uitmodus'
       : type.id === 'battery_soc_limit' ? `${number(value)} %`

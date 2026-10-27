@@ -41,6 +41,21 @@ test('beschikbare actuator blijft bedienbaar als zijn toestand al langer onveran
   assert.equal(sent.length, 1);
 });
 
+test('handmatig inschakelen pauzeert een actieve stroomregel niet', async () => {
+  const definition = { ...rule('switch_control', 'switch.boiler', 'off', 'keep'), conditions: [{ entityId: 'sensor.boiler_power', operator: 'gt', value: 10 }] };
+  const settings = rulesSchema.parse({ ...defaultRules, rules: [definition] });
+  const entities = [entity('sensor.boiler_power', 1500), entity('switch.boiler', 'off', { changedAt: new Date(now - 3600000).toISOString() })];
+  const config = { control: { ...settings, mode: 'active' }, mappings: {} };
+  const sent = [];
+  const runner = createRuleRunner({ store: { get: () => structuredClone(config) }, provider: async () => ({ connected: true, entities: entities.map(item => ({ ...item, reportedAt: new Date(now).toISOString() })) }),
+    unitProvider: async () => '°C', execute: async command => sent.push(command), activeAllowed: true, clock: () => now });
+  assert.equal((await runner.tick()).decisions[0].status, 'stable');
+  entities[1].state = 'on';
+  const result = await runner.tick();
+  assert.equal(result.decisions[0].status, 'sent');
+  assert.equal(sent[0].service, 'switch.turn_off');
+});
+
 test('wachttijd stelt dan-actie uit en anders niets doen laat apparaat met rust', async () => {
   const definition = { ...rule('switch_control', 'switch.boiler', 'off', 'keep'), delayMinutes: 30, conditions: [{ entityId: 'sensor.boiler_power', operator: 'gt', value: 10 }] };
   const settings = rulesSchema.parse({ ...defaultRules, rules: [definition] });
@@ -166,13 +181,15 @@ test('proefmodus verzendt nooit opdrachten, actieve modus vraagt terugmelding', 
   assert.equal(sent.length, 1);
 });
 
-test('handmatige wijziging pauzeert en transportfouten worden niet herhaald', async () => {
+test('handmatige wijziging pauzeert niet en transportfouten worden niet herhaald', async () => {
   const { runner, state } = runnerFixture('active');
   await runner.tick();
   state.entities[2].state = 'on';
   await runner.tick();
   state.entities[2].state = 'off';
-  assert.equal((await runner.tick()).decisions[0].status, 'paused');
+  const manualChange = (await runner.tick()).decisions[0];
+  assert.equal(manualChange.status, 'waiting');
+  assert.match(manualChange.reason, /Minimale tijd tussen opdrachten/);
   let attempts = 0;
   const failure = runnerFixture('active', async () => { attempts++; throw new Error('timeout'); });
   await failure.runner.tick(); await failure.runner.tick();

@@ -43,7 +43,7 @@ export function createRuleRunner({ store, provider, unitProvider, execute, activ
         memory.set(rule.id, previous);
         if ((heating ? thermal.mode : settings.mode) !== 'active') continue;
         if (!activeAllowed || demo) { decision.command = null; decision.status = 'blocked'; decision.reason = 'Live sturing niet vrijgegeven of demomodus actief.'; continue; }
-        if (previous.faulted || (previous.holdUntil ?? 0) > now) { decision.command = null; decision.status = 'paused'; decision.reason = previous.faulted ? 'Onzekere opdracht: schakel de regelaar uit en controleer het apparaat voordat je heractiveert.' : 'Handmatige wijziging: bron tijdelijk gepauzeerd.'; continue; }
+        if (previous.faulted) { decision.command = null; decision.status = 'paused'; decision.reason = 'Onzekere opdracht: schakel de regelaar uit en controleer het apparaat voordat je heractiveert.'; continue; }
         if (decision.status === 'blocked' || decision.status === 'disabled') continue;
         const device = heating ? thermalDevices.get(rule.action.entityId) ?? {} : null;
         const currentDevice = connection.entities.find(entity => entity.id === rule.action.entityId);
@@ -66,11 +66,6 @@ export function createRuleRunner({ store, provider, unitProvider, execute, activ
           }
           previous.pending = null;
           previous.observed = decision.observed;
-        } else if (previous.observed !== undefined && previous.observed !== decision.observed && !(decision.matched === false && rule.action.otherwise === 'keep')) {
-          previous.observed = decision.observed;
-          previous.holdUntil = now + settings.manualHoldMinutes * 60000;
-          if (device) device.holdUntil = previous.holdUntil;
-          decision.command = null; decision.status = 'paused'; decision.reason = 'Handmatige of externe wijziging gerespecteerd.'; continue;
         }
         previous.observed = decision.observed;
         if (!decision.command) continue;
