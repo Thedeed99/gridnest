@@ -41,6 +41,34 @@ test('beschikbare actuator blijft bedienbaar als zijn toestand al langer onveran
   assert.equal(sent.length, 1);
 });
 
+test('wachttijd stelt dan-actie uit en anders niets doen laat apparaat met rust', async () => {
+  const definition = { ...rule('switch_control', 'switch.boiler', 'off', 'keep'), delayMinutes: 30, conditions: [{ entityId: 'sensor.boiler_power', operator: 'gt', value: 10 }] };
+  const settings = rulesSchema.parse({ ...defaultRules, rules: [definition] });
+  const entities = [entity('sensor.boiler_power', 0), entity('switch.boiler', 'off')];
+  const ruleMemory = new Map();
+  const plan = time => planRules({ now: time, settings, entities: entities.map(item => ({ ...item, reportedAt: new Date(time).toISOString() })), mappings: {}, temperatureUnit: '°C', ruleMemory })[0];
+  assert.equal(plan(now).command, null);
+  entities[0].state = '1500'; entities[1].state = 'on';
+  assert.equal(plan(now).command, null);
+  assert.match(plan(now + 29 * 60000).reason, /nog 1 min/);
+  assert.equal(plan(now + 30 * 60000).command.service, 'switch.turn_off');
+  entities[0].state = '0'; entities[1].state = 'off';
+  assert.equal(plan(now + 31 * 60000).command, null);
+  assert.throws(() => rulesSchema.parse({ ...defaultRules, rules: [{ ...definition, action: { ...definition.action, value: 'keep' } }] }));
+
+  let clockTime = now;
+  const config = { control: { ...settings, mode: 'active' }, mappings: {} };
+  const sent = [];
+  const runner = createRuleRunner({ store: { get: () => structuredClone(config) }, provider: async () => ({ connected: true, entities: entities.map(item => ({ ...item, reportedAt: new Date(clockTime).toISOString(), changedAt: new Date(now - 3600000).toISOString() })) }),
+    unitProvider: async () => '°C', execute: async command => sent.push(command), activeAllowed: true, clock: () => clockTime });
+  await runner.tick();
+  entities[0].state = '1500'; entities[1].state = 'on'; clockTime += 60000;
+  assert.equal((await runner.tick()).decisions[0].status, 'stable');
+  clockTime += 30 * 60000;
+  assert.equal((await runner.tick()).decisions[0].status, 'sent');
+  assert.equal(sent[0].service, 'switch.turn_off');
+});
+
 test('stroomlimiet en PV-limiet respecteren eenheid, min/max en stap', () => {
   const amps = input('ev_current', 'number.amps', 12, 6, entity('number.amps', 6, { unit: 'A', minimum: 6, maximum: 16, step: 1 }));
   assert.equal(planRules(amps)[0].command.value, 12);

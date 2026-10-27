@@ -66,7 +66,7 @@ export function createRuleRunner({ store, provider, unitProvider, execute, activ
           }
           previous.pending = null;
           previous.observed = decision.observed;
-        } else if (previous.observed !== undefined && previous.observed !== decision.observed) {
+        } else if (previous.observed !== undefined && previous.observed !== decision.observed && !(decision.matched === false && rule.action.otherwise === 'keep')) {
           previous.observed = decision.observed;
           previous.holdUntil = now + settings.manualHoldMinutes * 60000;
           if (device) device.holdUntil = previous.holdUntil;
