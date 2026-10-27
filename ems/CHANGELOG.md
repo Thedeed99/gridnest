@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.4 - 2026-10-27
+
+- Pauzeer stroomregels niet meer wanneer een schakelaar handmatig wordt gewijzigd; de regel beoordeelt de situatie opnieuw bij de volgende cyclus.
+- Toon aan/uit-acties in de samenvatting als "inschakelen" en "uitschakelen" in plaats van "NaN".
+
 ## 2.0.3 - 2026-10-27
 
 - Stroomregels krijgen een wachttijd: de dan-actie start pas als de voorwaarden het opgegeven aantal minuten onafgebroken kloppen (bijvoorbeeld verbruik boven 10 W, 30 minuten wachten, dan uitschakelen).
