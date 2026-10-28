@@ -96,7 +96,7 @@ export function thermalReadings(thermal, entities, preferences = {}) {
   return { sources, rooms };
 }
 
-export function planThermal({ thermal, settings, entities, mappings, temperatureUnit, preferences = {}, now = Date.now(), solarMemory = new Map() }) {
+export function planThermal({ thermal, settings, entities, mappings, temperatureUnit, preferences = {}, now = Date.now(), solarMemory = new Map(), manualAction = false }) {
   const plans = [];
   const sources = thermal.sources.filter(source => source.controlEnabled).sort((first, second) => first.priority - second.priority);
   let solarOwner = sources.find(source => source.solar?.enabled && solarMemory.get(source.id)?.active)?.id;
@@ -150,7 +150,7 @@ export function planThermal({ thermal, settings, entities, mappings, temperature
       else plans.push(blocked(`Deze bron ondersteunt ${desiredMode === 'cool' ? 'koelen' : 'verwarmen'} niet en kan niet veilig worden uitgeschakeld.`));
       continue;
     }
-    if (entity.state !== desiredMode && entity.state !== 'off') {
+    if (entity.state !== desiredMode && entity.state !== 'off' && !manualAction) {
       plans.push(planMode(desiredMode, `${room.name}: eerst naar ${desiredMode === 'cool' ? 'koel' : 'verwarm'}modus schakelen.`, `${room.name}: gewenste klimaatmodus is actief.`));
       continue;
     }
@@ -163,7 +163,8 @@ export function planThermal({ thermal, settings, entities, mappings, temperature
     const decision = planRules({ settings: { ...settings, rules: [definition] }, entities, mappings, temperatureUnit, now })[0];
     plans.push({ ...decision, definition, sourceId: source.id, origin: 'thermal', roomName: room.name, solarNext: solar.next, targetC: solar.targetC,
       reason: decision.status === 'blocked' ? decision.reason : `${room.name}: doel ${solar.targetC} graden. ${solar.reason}` });
-    if (decision.status !== 'stable') continue;
+    const planModeAlongside = manualAction && decision.status === 'planned' && entity.state !== desiredMode;
+    if (decision.status !== 'stable' && !planModeAlongside) continue;
     const modePlan = planMode(desiredMode, `Doel bevestigd; ${desiredMode === 'cool' ? 'koelmodus' : 'verwarmmodus'} inschakelen.`, 'De eigen thermostaat regelt op het ingestelde kamerdoel.');
     plans.push(modePlan);
     if (modePlan.status === 'stable' && source.fanMode) plans.push(planFanMode());

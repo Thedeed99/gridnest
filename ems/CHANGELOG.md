@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.8 - 2026-10-28
+
+- Voer bij een handmatige kamerdoelwijziging de temperatuur- en klimaatmodusopdracht in dezelfde runner-cyclus uit; automatische regeling blijft op bevestiging wachten.
+- Laat het kamer-vinkje bij een airco de actuele `heat`/`cool`/`off`-stand volgen.
+
 ## 2.0.7 - 2026-10-28
 
 - Toon de kamercheckbox alleen wanneer vloerverwarming of een airco is gekoppeld; een CV blijft automatisch door de kamertemperatuur geregeld.

@@ -92,6 +92,29 @@ test('handmatig kamer uit omzeilt minimale opdrachttijd na een moduswijziging', 
   assert.equal(sent[1].value, 'off');
 });
 
+test('handmatig doel schakelt een uitgeschakelde thermostaat direct in dezelfde cyclus', async () => {
+  const input = fixture();
+  input.thermal.mode = 'active';
+  input.thermal.sources[0].profile = 'underfloor';
+  input.settings.minIntervalSeconds = 300;
+  input.entities[1].state = 'off';
+  input.entities[1].targetTemperature = 20;
+  const snapshot = { control: input.settings, thermal: input.thermal, mappings: input.mappings, preferences: {} };
+  const sent = [];
+  const runner = createRuleRunner({ store: { get: () => structuredClone(snapshot) },
+    provider: async () => ({ connected: true, entities: input.entities.map(entity => ({ ...entity, reportedAt: new Date(now).toISOString(), changedAt: new Date(now).toISOString() })) }),
+    unitProvider: async () => '°C', execute: async command => sent.push(command), activeAllowed: true, clock: () => now });
+
+  const result = await runner.tick({ manualAction: true });
+
+  assert.deepEqual(sent, [
+    { entityId: 'climate.cv', service: 'climate.set_temperature', value: 21 },
+    { entityId: 'climate.cv', service: 'climate.set_hvac_mode', value: 'heat' }
+  ]);
+  assert.equal(result.decisions.find(item => item.id === 'thermal:cv:temperature').status, 'sent');
+  assert.equal(result.decisions.find(item => item.id === 'thermal:cv:mode').status, 'sent');
+});
+
 test('automatische stand koelt met de airco en zet een CV zonder koelstand uit', () => {
   const input = fixture();
   input.thermal.sources.push({ id: 'airco', name: 'Airco', entityId: 'climate.airco', profile: 'airco', controlEnabled: true, confirmed: true, controlRoomId: 'living', priority: 2, fanMode: null });

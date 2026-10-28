@@ -1157,13 +1157,22 @@ function roomCard(room, config, live, compact = false) {
     const heatToggle = element('label', 'checkbox-field room-heat-toggle');
     const input = element('input');
     input.type = 'checkbox';
-    input.checked = room.heatingEnabled !== false;
-    const label = element('span', '', input.checked ? 'Klimaat aan' : 'Klimaat uit');
+    const hasAircoSource = controllableSources.some(source => source.profile === 'airco');
+    const label = element('span', '', '');
     const updateLabel = () => {
+      const currentRoom = data.thermal?.rooms.find(item => item.id === room.id);
+      const roomEnabled = currentRoom?.heatingEnabled !== false;
+      if (hasAircoSource && roomEnabled) {
+        const aircoIds = currentRoom.sourceIds.filter(id => data.thermal.sources.some(source => source.id === id && source.profile === 'airco' && source.controlEnabled));
+        input.checked = aircoIds.some(id => ['heat', 'cool'].includes(data.thermalReadings?.sources?.find(source => source.id === id)?.mode));
+      } else {
+        input.checked = roomEnabled;
+      }
       label.textContent = input.checked ? 'Klimaat aan' : 'Klimaat uit';
       input.setAttribute('aria-label', input.checked ? `Klimaatregeling voor ${room.name} uitschakelen` : `Klimaatregeling voor ${room.name} inschakelen`);
     };
     updateLabel();
+    bindLive(input, updateLabel);
     heatToggle.append(input, label);
     input.addEventListener('change', async () => {
       const heatingEnabled = input.checked;
