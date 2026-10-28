@@ -1094,7 +1094,7 @@ function roomCard(room, config, live, compact = false) {
       try {
         const result = await api('thermal', {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json', 'X-Gridnest-Confirm-Control': 'true' },
+          headers: { 'Content-Type': 'application/json', 'X-Gridnest-Confirm-Control': 'true', 'X-Gridnest-Manual-Action': 'true' },
           body: JSON.stringify(nextConfig)
         });
         reportRoomTarget(room.id, result);
@@ -1132,7 +1132,7 @@ function roomCard(room, config, live, compact = false) {
       if (!targetRoom || !Number.isFinite(current)) return;
       targetRoom.targetC = current;
       try {
-        await saveThermal(nextConfig, true);
+        await saveThermal(nextConfig, true, true);
         notify(`Kamerdoel ${room.name} overgenomen van thermostaat (${number(current)} °C).`);
       } catch (err) { notify(err.message, true); }
       });
@@ -1152,7 +1152,7 @@ function roomCard(room, config, live, compact = false) {
   });
   const stateRow = element('div', 'room-state-row');
   stateRow.append(status);
-  const controllableSources = config.sources.filter(source => room.sourceIds.includes(source.id) && source.controlEnabled && source.entityId);
+  const controllableSources = config.sources.filter(source => room.sourceIds.includes(source.id) && source.controlEnabled && source.entityId && ['underfloor', 'airco'].includes(source.profile));
   if (controllableSources.length) {
     const heatToggle = element('label', 'checkbox-field room-heat-toggle');
     const input = element('input');
@@ -1173,7 +1173,7 @@ function roomCard(room, config, live, compact = false) {
       if (!targetRoom) return;
       targetRoom.heatingEnabled = heatingEnabled;
       try {
-        const result = await saveThermal(next);
+        const result = await saveThermal(next, false, true);
         const sourceIds = result.thermal.sources.filter(source => source.controlRoomId === room.id && source.controlEnabled).map(source => source.id);
         const issue = result.controlStatus?.decisions?.find(decision => decision.origin === 'thermal' && sourceIds.includes(decision.sourceId) && ['blocked', 'paused', 'waiting'].includes(decision.status));
         if (issue) notify(`Instelling opgeslagen; ${issue.reason}`, true);
@@ -1229,7 +1229,7 @@ function roomCard(room, config, live, compact = false) {
         if (!targetSource) return;
         targetSource.fanMode = fanMode;
         try {
-          const result = await saveThermal(next);
+          const result = await saveThermal(next, false, true);
           const decision = result.controlStatus?.decisions?.find(item => item.id === `thermal:${source.id}:fan`);
           if (decision?.status === 'blocked') notify(decision.reason, true);
           else if (result.thermal.mode !== 'active') notify(fanMode ? `Ventilatorstand ${fanMode} opgeslagen voor Proefmodus.` : 'De thermostaat bepaalt de ventilatorstand weer.');
@@ -1287,7 +1287,7 @@ function thermal() {
   const saveMode = element('button', 'primary-button', 'Stand opslaan'); saveMode.prepend(icon('save'));
   const applyMode = async confirmed => {
     saveMode.disabled = true;
-    try { await saveThermal({ ...data.thermal, mode: mode.value }, confirmed); notify('Warmtestand opgeslagen.'); }
+    try { await saveThermal({ ...data.thermal, mode: mode.value }, confirmed, true); notify('Warmtestand opgeslagen.'); }
     catch (error) { notify(error.message, true); }
     finally { saveMode.disabled = false; }
   };
@@ -1378,8 +1378,8 @@ function reportRoomTarget(roomId, result) {
   notify('Kamerdoel opgeslagen; kies een vrijgegeven warmtebron met deze kamer als regelkamer.', true);
 }
 
-async function saveThermal(config, confirmActive = false) {
-  const result = await api('thermal', { method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-Gridnest-Confirm-Control': String(confirmActive) }, body: JSON.stringify(config) });
+async function saveThermal(config, confirmActive = false, manualAction = false) {
+  const result = await api('thermal', { method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-Gridnest-Confirm-Control': String(confirmActive), 'X-Gridnest-Manual-Action': String(manualAction) }, body: JSON.stringify(config) });
   data.thermal = result.thermal;
   if (result.controlStatus) data.controlStatus = result.controlStatus;
   await refresh();
@@ -1597,7 +1597,7 @@ function editThermal(kind, id = null, floor = '') {
           next.sources = next.sources.filter(source => source.id !== id);
           next.rooms = next.rooms.map(room => ({ ...room, sourceIds: room.sourceIds.filter(sourceId => sourceId !== id) }));
         }
-        await saveThermal(next);
+        await saveThermal(next, false, true);
         dialog.close();
         notify('Verwijderd.');
       } catch (error) {
@@ -1640,7 +1640,7 @@ function editThermal(kind, id = null, floor = '') {
       next[key] = id ? next[key].map(existing => existing.id === id ? item : existing) : [...next[key], item];
       if (isRoom) next.sources = next.sources.map(source => source.controlRoomId === item.id && !item.sourceIds.includes(source.id) ? { ...source, controlRoomId: null, controlEnabled: false, confirmed: false } : source);
       const targetOnly = isRoom && original && onlyRoomTargetChanged(original, item);
-      const result = await saveThermal(next, targetOnly && next.mode === 'active');
+      const result = await saveThermal(next, targetOnly && next.mode === 'active', true);
       dialog.close();
       if (targetOnly) reportRoomTarget(item.id, result);
       else notify(isRoom ? 'Kamer opgeslagen.' : 'Warmtebron opgeslagen.');

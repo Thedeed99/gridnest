@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.7 - 2026-10-28
+
+- Toon de kamercheckbox alleen wanneer vloerverwarming of een airco is gekoppeld; een CV blijft automatisch door de kamertemperatuur geregeld.
+- Laat expliciete handmatige Warmte-acties de minimale opdrachtduur overslaan, zonder die intervalcontrole voor Stroomregels te wijzigen.
+
 ## 2.0.6 - 2026-10-28
 
 - Kies automatisch verwarmen of koelen op basis van kamertemperatuur en doel, met een deadband van 0,5 °C; schakelt bronnen zonder koelstand uit.
