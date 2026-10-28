@@ -5,7 +5,6 @@ export function createRuleRunner({ store, provider, unitProvider, execute, activ
   const memory = new Map();
   const ruleMemory = new Map();
   const solarMemory = new Map();
-  const thermalDevices = new Map();
   let timer;
   let running;
   let lastMode;
@@ -17,7 +16,7 @@ export function createRuleRunner({ store, provider, unitProvider, execute, activ
     const thermal = snapshot.thermal ?? { mode: 'off', sources: [], rooms: [] };
     const now = clock();
     if (settings.mode !== lastMode) { for (const key of memory.keys()) if (!key.startsWith('thermal:')) memory.delete(key); ruleMemory.clear(); lastMode = settings.mode; }
-    if (thermal.mode !== lastThermalMode) { for (const key of memory.keys()) if (key.startsWith('thermal:')) memory.delete(key); solarMemory.clear(); thermalDevices.clear(); lastThermalMode = thermal.mode; }
+    if (thermal.mode !== lastThermalMode) { for (const key of memory.keys()) if (key.startsWith('thermal:')) memory.delete(key); solarMemory.clear(); lastThermalMode = thermal.mode; }
     status = { mode: settings.mode, thermalMode: thermal.mode, activeAllowed, updatedAt: new Date(now).toISOString(), decisions: [] };
     if (settings.mode === 'off' && thermal.mode === 'off') return status;
     try {
@@ -45,15 +44,6 @@ export function createRuleRunner({ store, provider, unitProvider, execute, activ
         if (!activeAllowed || demo) { decision.command = null; decision.status = 'blocked'; decision.reason = 'Live sturing niet vrijgegeven of demomodus actief.'; continue; }
         if (previous.faulted) { decision.command = null; decision.status = 'paused'; decision.reason = 'Onzekere opdracht: schakel de regelaar uit en controleer het apparaat voordat je heractiveert.'; continue; }
         if (decision.status === 'blocked' || decision.status === 'disabled') continue;
-        const device = heating ? thermalDevices.get(rule.action.entityId) ?? {} : null;
-        const currentDevice = connection.entities.find(entity => entity.id === rule.action.entityId);
-        if (device) {
-          if (device.mode !== undefined && device.mode !== currentDevice.state && device.expectedMode !== currentDevice.state) device.holdUntil = now + settings.manualHoldMinutes * 60000;
-          if (device.expectedMode === currentDevice.state) device.expectedMode = null;
-          device.mode = currentDevice.state;
-          thermalDevices.set(rule.action.entityId, device);
-          if ((device.holdUntil ?? 0) > now) { decision.command = null; decision.status = 'paused'; decision.reason = 'Warmtebron handmatig gewijzigd of opdracht onzeker; bron gepauzeerd.'; continue; }
-        }
         if (previous.pending) {
           const expected = previous.pending;
           const confirmed = typeof expected.value === 'number' ? Math.abs(decision.observed - expected.value) < 0.001 : decision.observed === expected.value;
@@ -61,7 +51,7 @@ export function createRuleRunner({ store, provider, unitProvider, execute, activ
             decision.command = null;
             decision.status = now - expected.sentAt > 120000 ? 'paused' : 'waiting';
             decision.reason = 'Wachten op apparaatbevestiging; er wordt niet automatisch opnieuw verzonden.';
-            if (decision.status === 'paused') { previous.faulted = true; if (device) device.holdUntil = Infinity; }
+            if (decision.status === 'paused') previous.faulted = true;
             continue;
           }
           previous.pending = null;
@@ -86,14 +76,12 @@ export function createRuleRunner({ store, provider, unitProvider, execute, activ
         }
         try {
           await execute(decision.command);
-          if (device && decision.command.service === 'climate.set_hvac_mode') device.expectedMode = decision.command.value;
           previous.pending = { value: decision.command.service.startsWith('switch.') ? decision.command.service.endsWith('turn_on') ? 'on' : 'off' : decision.command.value, sentAt: clock() };
           previous.sentAt = clock();
           decision.status = 'sent'; decision.reason = 'Opdracht verzonden; apparaatbevestiging volgt.';
           sentEntities.add(actuator.id); sent++;
         } catch {
           previous.faulted = true;
-          if (device) device.holdUntil = Infinity;
           decision.command = null; decision.status = 'paused'; decision.reason = 'Opdrachtresultaat onzeker; geen automatische herhaling.';
         }
       }

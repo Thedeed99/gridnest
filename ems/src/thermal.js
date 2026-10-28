@@ -106,8 +106,23 @@ export function planThermal({ thermal, settings, entities, mappings, temperature
       enabled: true, confirmed: source.confirmed, conditions: [],
       action: { type: 'climate_temperature', entityId: source.entityId, value: room?.targetC ?? 20, otherwise: room?.targetC ?? 20 } };
     const blocked = reason => ({ definition, id: definition.id, name: source.name, sourceId: source.id, origin: 'thermal', priority: definition.priority, status: 'blocked', command: null, reason });
-    if (!room || !source.entityId || source.profile === 'unspecified') { plans.push(blocked('Kies een gekoppelde regelkamer, bedieningsentiteit en verwarmingsprofiel.')); continue; }
+    if (!room || !source.entityId) { plans.push(blocked('Kies een gekoppelde regelkamer en bedieningsentiteit.')); continue; }
+    const planMode = (value, commandReason, stableReason) => {
+      const modeDefinition = { ...definition, id: `thermal:${source.id}:mode`, action: { type: 'climate_mode', entityId: source.entityId, value, otherwise: value } };
+      const mode = planRules({ settings: { ...settings, rules: [modeDefinition] }, entities, mappings, temperatureUnit, now })[0];
+      return { ...mode, definition: modeDefinition, sourceId: source.id, origin: 'thermal', roomName: room.name,
+        reason: mode.status === 'blocked' ? mode.reason : mode.command ? commandReason : stableReason };
+    };
+    if (room.heatingEnabled === false) {
+      plans.push(planMode('off', `${room.name}: verwarming uitschakelen.`, `${room.name}: verwarming staat uit.`));
+      continue;
+    }
+    if (source.profile === 'unspecified') { plans.push(blocked('Kies een verwarmingsprofiel voor deze warmtebron.')); continue; }
     if (!entity?.hvacModes?.includes('heat')) { plans.push(blocked('Deze bron bevestigt geen verwarmmodus.')); continue; }
+    if (!['heat', 'off'].includes(entity.state)) {
+      plans.push(planMode('heat', `${room.name}: eerst naar verwarmmodus schakelen.`, `${room.name}: verwarmmodus is actief.`));
+      continue;
+    }
     let baseTarget = room.targetC;
     let occupied = null;
     if (room.presenceControl) {
@@ -125,10 +140,7 @@ export function planThermal({ thermal, settings, entities, mappings, temperature
     plans.push({ ...decision, definition, sourceId: source.id, origin: 'thermal', roomName: room.name, solarNext: solar.next, targetC: solar.targetC,
       reason: decision.status === 'blocked' ? decision.reason : `${room.name}: doel ${solar.targetC} graden. ${solar.reason}` });
     if (decision.status !== 'stable') continue;
-    const modeDefinition = { ...definition, id: `thermal:${source.id}:mode`, action: { type: 'climate_mode', entityId: source.entityId, value: 'heat', otherwise: 'heat' } };
-    const mode = planRules({ settings: { ...settings, rules: [modeDefinition] }, entities, mappings, temperatureUnit, now })[0];
-    plans.push({ ...mode, definition: modeDefinition, sourceId: source.id, origin: 'thermal', roomName: room.name,
-      reason: mode.status === 'blocked' ? mode.reason : mode.command ? 'Doel bevestigd; verwarmmodus inschakelen. De eigen thermostaat regelt de warmtelevering.' : 'De eigen thermostaat regelt op het ingestelde kamerdoel.' });
+    plans.push(planMode('heat', 'Doel bevestigd; verwarmmodus inschakelen.', 'De eigen thermostaat regelt op het ingestelde kamerdoel.'));
   }
   return plans;
 }

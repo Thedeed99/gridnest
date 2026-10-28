@@ -24,6 +24,27 @@ test('Warmte zet het kamerdoel om in een thermostaatopdracht, ook zonder gebruik
   assert.deepEqual(plans[0].command, { entityId: 'climate.cv', service: 'climate.set_temperature', value: 21 });
 });
 
+test('Warmte kan een airco met expliciete halve-graadstap aansturen', () => {
+  const input = fixture();
+  input.thermal.sources[0].profile = 'airco';
+  input.entities[1] = { ...input.entities[1], minTempC: 16, maxTempC: 30, targetStepC: 0.5, supportedFeatures: 953, hvacModes: ['off', 'heat_cool', 'cool', 'dry', 'fan_only', 'heat'], state: 'heat', targetTemperature: 20.5 };
+  const plans = planThermal(input);
+  assert.deepEqual(plans[0].command, { entityId: 'climate.cv', service: 'climate.set_temperature', value: 21 });
+});
+
+test('kamerbediening zet een gekoppelde bron uit en schakelt veilig naar heat voor aan', () => {
+  const input = fixture();
+  input.entities[1] = { ...input.entities[1], state: 'cool', hvacModes: ['off', 'heat', 'cool'] };
+  input.thermal.rooms[0].heatingEnabled = false;
+  const off = planThermal(input);
+  assert.deepEqual(off[0].command, { entityId: 'climate.cv', service: 'climate.set_hvac_mode', value: 'off' });
+
+  input.thermal.rooms[0].heatingEnabled = true;
+  const on = planThermal(input);
+  assert.deepEqual(on[0].command, { entityId: 'climate.cv', service: 'climate.set_hvac_mode', value: 'heat' });
+  assert.equal(thermalSchema.parse({ ...input.thermal, rooms: [{ ...input.thermal.rooms[0], heatingEnabled: undefined }] }).rooms[0].heatingEnabled, true);
+});
+
 test('Warmte stuurt een beschikbare thermostaat aan met een onveranderde oude status', () => {
   const input = fixture();
   input.entities[1].reportedAt = '2026-10-11T00:00:00Z';
@@ -210,6 +231,22 @@ test('Warmte is aangesloten op de uitvoerlaag, onafhankelijk van Stroom', async 
   input.entities[1].targetTemperature = 21;
   await runner.tick();
   assert.equal(sent[1].service, 'climate.set_hvac_mode');
+});
+
+test('handmatige moduswijziging pauzeert Warmte niet', async () => {
+  const input = fixture();
+  input.thermal.mode = 'active';
+  input.entities[1].state = 'heat';
+  input.entities[1].targetTemperature = 21;
+  input.entities[1].changedAt = new Date(now - 3600000).toISOString();
+  const snapshot = { control: defaultRules, thermal: input.thermal, mappings: {}, preferences: {} };
+  const sent = [];
+  const runner = createRuleRunner({ store: { get: () => structuredClone(snapshot) }, provider: async () => ({ connected: true, entities: input.entities }), unitProvider: async () => '°C', execute: async command => { sent.push(command); }, activeAllowed: true, clock: () => now });
+  await runner.tick();
+  input.entities[1].state = 'off';
+  const result = await runner.tick();
+  assert.equal(result.decisions.find(decision => decision.id === 'thermal:cv:mode').status, 'sent');
+  assert.deepEqual(sent, [{ entityId: 'climate.cv', service: 'climate.set_hvac_mode', value: 'heat' }]);
 });
 
 test('alleen kamerdoel wijzigen behoudt regeling en stuurt het nieuwe climate-doel', async () => {

@@ -26,6 +26,7 @@ export const rulesSchema = z.object({
     id: z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/), name: z.string().trim().min(1).max(80),
     priority: z.number().int().min(1).max(100).default(50),
     delayMinutes: z.number().int().min(0).max(1440).default(0),
+    conditionMode: z.enum(['all', 'any']).default('all'),
     enabled: z.boolean().default(false), confirmed: z.boolean().default(false),
     conditions: z.array(z.object({
       entityId,
@@ -91,7 +92,7 @@ export function planRules({ settings, entities, mappings, temperatureUnit, now =
     const blocked = reason => ({ ...result, reason });
     if (!rule.enabled) return { ...result, status: 'disabled', reason: 'Regel uitgeschakeld.' };
     if (!rule.confirmed) return blocked('Bevestig de geschiktheid en werking van de bedieningsentiteit.');
-    let match = true;
+    let match = rule.conditionMode === 'any' ? false : true;
     for (const [cIndex, condition] of rule.conditions.entries()) {
       const entity = entities.find(entity => entity.id === condition.entityId);
       if (!isFresh(entity, now, settings.maxAgeSeconds)) return blocked('Voorwaardemeting ontbreekt of is niet recent; ook de anders-actie wordt niet uitgevoerd.');
@@ -137,7 +138,7 @@ export function planRules({ settings, entities, mappings, temperatureUnit, now =
       } else {
         ruleMemory.delete(condKey);
       }
-      match = match && condMatch;
+      match = rule.conditionMode === 'any' ? match || condMatch : match && condMatch;
     }
     const delayKey = `${rule.id}:delay`;
     let waitingReason = '';
@@ -158,13 +159,14 @@ export function planRules({ settings, entities, mappings, temperatureUnit, now =
     let service;
     let observed;
     if (action.type === 'climate_temperature') {
-      if (temperatureUnit !== '°C' || !(entity.supportedFeatures & 1) || !Number.isFinite(entity.targetStepC) || entity.targetStepC <= 0 || !Number.isFinite(entity.minTempC) || !Number.isFinite(entity.maxTempC) || !['heat', 'off'].includes(entity.state)) return blocked('Celsius, temperatuurbediening, apparaatgrenzen en verwarmmodus/off moeten bevestigd zijn.');
-      value = Math.round(value / entity.targetStepC) * entity.targetStepC;
+      const targetStepC = entity.targetStepC ?? 0.1;
+      if (temperatureUnit !== '°C' || !(entity.supportedFeatures & 1) || !Number.isFinite(targetStepC) || targetStepC <= 0 || !Number.isFinite(entity.minTempC) || !Number.isFinite(entity.maxTempC) || !['heat', 'off'].includes(entity.state)) return blocked('Celsius, temperatuurbediening, apparaatgrenzen en verwarmmodus/off moeten bevestigd zijn.');
+      value = Math.round(value / targetStepC) * targetStepC;
       if (value < Math.max(12, entity.minTempC) || value > Math.min(26, entity.maxTempC)) return blocked('Temperatuurdoel buiten apparaatgrenzen.');
       observed = entity.targetTemperature;
       service = 'climate.set_temperature';
     } else if (action.type === 'climate_mode') {
-      if (!entity.hvacModes?.includes(value) || !['heat', 'off'].includes(entity.state)) return blocked('HVAC-modus niet ondersteund of andere modus handmatig actief.');
+      if (!entity.hvacModes?.includes(value) || !entity.hvacModes.includes(entity.state)) return blocked('HVAC-modus niet ondersteund of actuele modus onbekend.');
       observed = entity.state; service = 'climate.set_hvac_mode';
     } else if (['ev_enable', 'battery_enable', 'switch_control'].includes(action.type)) {
       if (!['on', 'off'].includes(entity.state)) return blocked('Schakelaar heeft geen geldige aan/uit-status.');
