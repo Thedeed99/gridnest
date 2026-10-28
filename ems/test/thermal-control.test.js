@@ -47,6 +47,7 @@ test('airco-ventilatorstand is optioneel en wordt alleen naar een ondersteunde s
 
 test('kamerbediening zet een gekoppelde bron uit en schakelt veilig naar heat voor aan', () => {
   const input = fixture();
+  input.thermal.sources[0].profile = 'underfloor';
   input.entities[1] = { ...input.entities[1], state: 'cool', hvacModes: ['off', 'heat', 'cool'] };
   input.thermal.rooms[0].heatingEnabled = false;
   const off = planThermal(input);
@@ -56,6 +57,39 @@ test('kamerbediening zet een gekoppelde bron uit en schakelt veilig naar heat vo
   const on = planThermal(input);
   assert.deepEqual(on[0].command, { entityId: 'climate.cv', service: 'climate.set_hvac_mode', value: 'heat' });
   assert.equal(thermalSchema.parse({ ...input.thermal, rooms: [{ ...input.thermal.rooms[0], heatingEnabled: undefined }] }).rooms[0].heatingEnabled, true);
+});
+
+test('kamer-checkbox schakelt een CV niet uit maar schakelt vloerverwarming wel uit', () => {
+  const input = fixture();
+  input.entities[1].state = 'heat';
+  input.thermal.rooms[0].heatingEnabled = false;
+  assert.deepEqual(planThermal(input)[0].command, { entityId: 'climate.cv', service: 'climate.set_temperature', value: 21 });
+  input.thermal.sources[0].profile = 'underfloor';
+  assert.deepEqual(planThermal(input)[0].command, { entityId: 'climate.cv', service: 'climate.set_hvac_mode', value: 'off' });
+});
+
+test('handmatig kamer uit omzeilt minimale opdrachttijd na een moduswijziging', async () => {
+  const input = fixture();
+  input.thermal.mode = 'active';
+  input.thermal.sources[0].profile = 'underfloor';
+  input.entities[1].state = 'off';
+  input.entities[1].targetTemperature = 21;
+  input.entities[1].changedAt = new Date(now - 3600000).toISOString();
+  const snapshot = { control: input.settings, thermal: input.thermal, mappings: input.mappings, preferences: {} };
+  const sent = [];
+  let time = now;
+  const runner = createRuleRunner({ store: { get: () => structuredClone(snapshot) },
+    provider: async () => ({ connected: true, entities: input.entities.map(entity => ({ ...entity, reportedAt: new Date(time).toISOString() })) }),
+    unitProvider: async () => '°C', execute: async command => sent.push(command), activeAllowed: true, clock: () => time });
+  await runner.tick();
+  assert.equal(sent[0].value, 'heat');
+  input.entities[1].state = 'heat';
+  input.entities[1].changedAt = new Date(time).toISOString();
+  input.thermal.rooms[0].heatingEnabled = false;
+  time += 30000;
+  assert.equal((await runner.tick()).decisions[0].status, 'waiting');
+  assert.equal((await runner.tick({ manualAction: true })).decisions[0].status, 'sent');
+  assert.equal(sent[1].value, 'off');
 });
 
 test('automatische stand koelt met de airco en zet een CV zonder koelstand uit', () => {

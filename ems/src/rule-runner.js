@@ -10,7 +10,7 @@ export function createRuleRunner({ store, provider, unitProvider, execute, activ
   let lastMode;
   let lastThermalMode;
   let status = { mode: 'off', activeAllowed, updatedAt: null, decisions: [] };
-  async function run() {
+  async function run({ manualAction = false } = {}) {
     const snapshot = store.get();
     const settings = snapshot.control;
     const thermal = snapshot.thermal ?? { mode: 'off', sources: [], rooms: [] };
@@ -63,7 +63,7 @@ export function createRuleRunner({ store, provider, unitProvider, execute, activ
         const switching = decision.command.service.startsWith('switch.') || decision.command.service === 'climate.set_hvac_mode';
         const changed = Date.parse(actuator?.changedAt);
         const protectiveStop = rule.action.type === 'battery_power' && decision.command.value === 0;
-        if (!protectiveStop && ((previous.sentAt && now - previous.sentAt < settings.minIntervalSeconds * 1000) || switching && (!Number.isFinite(changed) || now - changed < settings.minIntervalSeconds * 1000))) {
+        if (!(manualAction && heating) && !protectiveStop && ((previous.sentAt && now - previous.sentAt < settings.minIntervalSeconds * 1000) || switching && (!Number.isFinite(changed) || now - changed < settings.minIntervalSeconds * 1000))) {
           decision.command = null; decision.status = 'waiting'; decision.reason = 'Minimale tijd tussen opdrachten nog niet verstreken.'; continue;
         }
         if (sent >= 4 || sentEntities.has(actuator.id)) { decision.command = null; decision.status = 'waiting'; decision.reason = 'Opdracht volgt in een volgende regelcyclus.'; continue; }
@@ -92,9 +92,9 @@ export function createRuleRunner({ store, provider, unitProvider, execute, activ
   }
   return {
     status: () => structuredClone(status),
-    tick() {
-      if (running) return running;
-      running = run().finally(() => { running = null; });
+    tick(options = {}) {
+      if (running) return options.manualAction ? running.then(() => this.tick(options)) : running;
+      running = run(options).finally(() => { running = null; });
       return running;
     },
     start() { if (!timer) timer = setInterval(() => { this.tick(); }, 30000); this.tick(); },

@@ -124,7 +124,7 @@ export function planThermal({ thermal, settings, entities, mappings, temperature
         status: command ? 'planned' : 'stable', observed: entity.fanMode, command,
         reason: command ? `Ventilatorstand wijzigen naar ${source.fanMode}.` : `Ventilatorstand ${source.fanMode} bevestigd.`, definition: fanDefinition };
     };
-    if (room.heatingEnabled === false) {
+    if (room.heatingEnabled === false && ['underfloor', 'airco'].includes(source.profile)) {
       plans.push(planMode('off', `${room.name}: klimaatregeling uitschakelen.`, `${room.name}: klimaatregeling staat uit.`));
       continue;
     }
