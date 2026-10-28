@@ -23,13 +23,13 @@ export function createRuleRunner({ store, provider, unitProvider, execute, activ
       const connection = await provider();
       if (!connection.connected && !demo) throw new Error('offline');
       const temperatureUnit = thermal.mode !== 'off' || settings.rules.some(rule => rule.enabled && rule.action.type === 'climate_temperature') ? await unitProvider() : null;
-      const collect = (entities, time) => {
+      const collect = (entities, time, manual = false) => {
         const power = settings.mode === 'off' ? [] : planRules({ settings, entities, mappings: snapshot.mappings, temperatureUnit, now: time, ruleMemory }).map(decision => ({ ...decision, origin: 'power', definition: settings.rules.find(rule => rule.id === decision.id) }));
-        const heat = thermal.mode === 'off' ? [] : planThermal({ thermal, settings, entities, mappings: snapshot.mappings, preferences: snapshot.preferences, temperatureUnit, now: time, solarMemory });
+        const heat = thermal.mode === 'off' ? [] : planThermal({ thermal, settings, entities, mappings: snapshot.mappings, preferences: snapshot.preferences, temperatureUnit, now: time, solarMemory, manualAction: manual });
         const conflicts = new Set(power.filter(decision => decision.definition.enabled && heat.some(item => item.definition.action.entityId === decision.definition.action.entityId)).map(decision => decision.definition.action.entityId));
         return [...power, ...heat].map(decision => conflicts.has(decision.definition.action.entityId) ? { ...decision, command: null, status: 'blocked', reason: 'Dubbele thermostaatbediening in Warmte en Stroom. Schakel de oude stroomregel uit.' } : decision).sort((first, second) => first.priority - second.priority);
       };
-      const decisions = collect(connection.entities, now);
+      const decisions = collect(connection.entities, now, manualAction);
       for (const decision of decisions) if (decision.solarNext) solarMemory.set(decision.sourceId, decision.solarNext);
       status.decisions = decisions;
       const sentEntities = new Set();
@@ -66,11 +66,11 @@ export function createRuleRunner({ store, provider, unitProvider, execute, activ
         if (!(manualAction && heating) && !protectiveStop && ((previous.sentAt && now - previous.sentAt < settings.minIntervalSeconds * 1000) || switching && (!Number.isFinite(changed) || now - changed < settings.minIntervalSeconds * 1000))) {
           decision.command = null; decision.status = 'waiting'; decision.reason = 'Minimale tijd tussen opdrachten nog niet verstreken.'; continue;
         }
-        if (sent >= 4 || sentEntities.has(actuator.id)) { decision.command = null; decision.status = 'waiting'; decision.reason = 'Opdracht volgt in een volgende regelcyclus.'; continue; }
+        if (sent >= 4 || sentEntities.has(actuator.id) && !(manualAction && heating)) { decision.command = null; decision.status = 'waiting'; decision.reason = 'Opdracht volgt in een volgende regelcyclus.'; continue; }
         if (JSON.stringify(store.get()) !== JSON.stringify(snapshot)) break;
         const freshConnection = await provider();
         if (!freshConnection.connected) throw new Error('offline');
-        const verified = collect(freshConnection.entities, clock()).find(item => item.id === rule.id);
+        const verified = collect(freshConnection.entities, clock(), manualAction).find(item => item.id === rule.id);
         if (!verified?.command || JSON.stringify(verified.command) !== JSON.stringify(decision.command) || !freshConnection.entities.find(item => item.id === actuator.id)?.available || JSON.stringify(store.get()) !== JSON.stringify(snapshot)) {
           decision.command = null; decision.status = 'waiting'; decision.reason = 'Meetwaarden of instellingen gewijzigd; opnieuw beoordelen.'; continue;
         }
