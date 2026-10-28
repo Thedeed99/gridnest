@@ -32,6 +32,19 @@ test('Warmte kan een airco met expliciete halve-graadstap aansturen', () => {
   assert.deepEqual(plans[0].command, { entityId: 'climate.cv', service: 'climate.set_temperature', value: 21 });
 });
 
+test('airco-ventilatorstand is optioneel en wordt alleen naar een ondersteunde stand gestuurd', () => {
+  const input = fixture();
+  input.thermal.sources[0].profile = 'airco';
+  input.thermal.sources[0].fanMode = 'Low';
+  input.entities[1] = { ...input.entities[1], state: 'heat', targetTemperature: 21, fanMode: 'Auto', fanModes: ['Auto', 'Low', 'Mid', 'High'], supportedFeatures: 9 };
+  const fan = planThermal(input).find(decision => decision.id === 'thermal:cv:fan');
+  assert.deepEqual(fan.command, { entityId: 'climate.cv', service: 'climate.set_fan_mode', value: 'Low' });
+  input.entities[1].fanMode = 'Low';
+  assert.equal(planThermal(input).find(decision => decision.id === 'thermal:cv:fan').status, 'stable');
+  input.entities[1].fanModes = ['Auto', 'High'];
+  assert.throws(() => validateThermal(input.thermal, input.entities), /ventilatorstand/);
+});
+
 test('kamerbediening zet een gekoppelde bron uit en schakelt veilig naar heat voor aan', () => {
   const input = fixture();
   input.entities[1] = { ...input.entities[1], state: 'cool', hvacModes: ['off', 'heat', 'cool'] };
@@ -43,6 +56,40 @@ test('kamerbediening zet een gekoppelde bron uit en schakelt veilig naar heat vo
   const on = planThermal(input);
   assert.deepEqual(on[0].command, { entityId: 'climate.cv', service: 'climate.set_hvac_mode', value: 'heat' });
   assert.equal(thermalSchema.parse({ ...input.thermal, rooms: [{ ...input.thermal.rooms[0], heatingEnabled: undefined }] }).rooms[0].heatingEnabled, true);
+});
+
+test('automatische stand koelt met de airco en zet een CV zonder koelstand uit', () => {
+  const input = fixture();
+  input.thermal.sources.push({ id: 'airco', name: 'Airco', entityId: 'climate.airco', profile: 'airco', controlEnabled: true, confirmed: true, controlRoomId: 'living', priority: 2, fanMode: null });
+  input.thermal.rooms[0].sourceIds.push('airco');
+  input.entities[0].state = '22';
+  input.entities[1].state = 'heat';
+  input.entities.push({ id: 'climate.airco', domain: 'climate', available: true, state: 'heat', targetTemperature: 20, hvacModes: ['off', 'heat', 'cool'], supportedFeatures: 9, minTempC: 16, maxTempC: 30, targetStepC: 0.5 });
+  const plans = planThermal(input);
+  assert.deepEqual(plans.find(item => item.id === 'thermal:cv:mode').command, { entityId: 'climate.cv', service: 'climate.set_hvac_mode', value: 'off' });
+  assert.deepEqual(plans.find(item => item.id === 'thermal:airco:mode').command, { entityId: 'climate.airco', service: 'climate.set_hvac_mode', value: 'cool' });
+});
+
+test('automatische stand verwarmt of koelt buiten een deadband van 0,5 graden', () => {
+  const input = fixture();
+  input.thermal.sources[0].profile = 'airco';
+  input.entities[1] = { ...input.entities[1], state: 'cool', hvacModes: ['off', 'heat', 'cool'], targetTemperature: 21, supportedFeatures: 9 };
+  input.entities[0].state = '20.4';
+  assert.equal(planThermal(input).find(item => item.id === 'thermal:cv:mode').command.value, 'heat');
+  input.entities[0].state = '21.6';
+  input.entities[1].state = 'heat';
+  assert.equal(planThermal(input).find(item => item.id === 'thermal:cv:mode').command.value, 'cool');
+  input.entities[0].state = '21.4';
+  input.entities[1].state = 'heat';
+  assert.equal(planThermal(input).find(item => item.id === 'thermal:cv:mode').command, null);
+});
+
+test('automatische stand blokkeert als een recente kamertemperatuur ontbreekt', () => {
+  const input = fixture();
+  input.thermal.rooms[0].temperatureEntity = 'sensor.missing';
+  const decision = planThermal(input)[0];
+  assert.equal(decision.status, 'blocked');
+  assert.match(decision.reason, /kamertemperatuur/);
 });
 
 test('Warmte stuurt een beschikbare thermostaat aan met een onveranderde oude status', () => {
@@ -60,9 +107,9 @@ test('kamerspecifieke person-aanwezigheid stuurt het kamerdoel naar comfort of a
   assert.doesNotThrow(() => validateThermal(input.thermal, input.entities));
   assert.equal(planThermal(input)[0].command.value, 21);
   input.entities.find(entity => entity.id === 'person.resident').state = 'not_home';
-  assert.equal(planThermal(input)[0].command.value, 17);
+  assert.equal(planThermal(input)[0].command, null);
   input.thermal.rooms[0].awayC = 19;
-  assert.equal(planThermal(input)[0].command.value, 19);
+  assert.equal(planThermal(input)[0].command, null);
 });
 
 test('aanwezigheid gebruikt alleen de status en valt bij een onbruikbare kamersensor terug op Mijn wensen', () => {
@@ -74,13 +121,14 @@ test('aanwezigheid gebruikt alleen de status en valt bij een onbruikbare kamerse
     { id: 'binary_sensor.room_presence', domain: 'binary_sensor', deviceClass: 'presence', available: false, state: 'unavailable' },
     { id: 'person.resident', domain: 'person', available: true, state: 'not_home', reportedAt: '2026-10-11T00:00:00Z' }
   );
-  assert.equal(planThermal(input)[0].command.value, 16);
+  assert.equal(planThermal(input)[0].command, null);
   input.entities[3].state = 'home';
   assert.equal(planThermal(input)[0].command.value, 21);
 });
 
 test('warmte gebruikt de aanwezigheid uit Mijn wensen als de kamer geen eigen sensor heeft', () => {
   const input = fixture();
+  input.entities[1].hvacModes = ['heat', 'cool', 'off'];
   input.thermal.rooms[0].presenceControl = true;
   input.preferences = { awayC: 16, presenceEntities: ['person.resident'], presenceMode: 'any' };
   input.entities.push({ id: 'person.resident', domain: 'person', available: true, state: 'not_home', reportedAt: new Date(now).toISOString() });
@@ -107,7 +155,7 @@ test('kamer met climate-entiteit als temperatuursensor kan regelen en verwarmmod
       domain: 'climate',
       available: true,
       state: 'off',
-      currentTemperature: 19.5,
+      currentTemperature: 19.4,
       targetTemperature: 20,
       hvacModes: ['heat', 'off'],
       supportedFeatures: 1,
@@ -132,21 +180,21 @@ test('monitor-only en onbevestigde bronnen sturen niet', () => {
   assert.equal(planThermal(input)[0].command, null);
 });
 
-test('kamerdoel wordt naar Tado gestuurd zonder verse kamertemperatuur', () => {
+test('automatische modus blokkeert Tado-aansturing zonder verse kamertemperatuur', () => {
   const input = fixture();
   input.thermal.rooms[0].temperatureEntity = 'climate.cv';
   input.thermal.rooms[0].targetC = 21;
   input.entities[1].currentTemperature = null;
   input.entities[1].reportedAt = '2026-10-11T00:00:00Z';
   const decision = planThermal(input)[0];
-  assert.deepEqual(decision.command, { entityId: 'climate.cv', service: 'climate.set_temperature', value: 21 });
-  assert.doesNotMatch(decision.reason, /Kamertemperatuur in Celsius/);
+  assert.equal(decision.status, 'blocked');
+  assert.match(decision.reason, /recente kamertemperatuur/);
 
   input.thermal.rooms[0].temperatureEntity = null;
-  assert.deepEqual(planThermal(input)[0].command, { entityId: 'climate.cv', service: 'climate.set_temperature', value: 21 });
+  assert.equal(planThermal(input)[0].status, 'blocked');
 });
 
-test('actieve Warmte stuurt het Tado-doel zonder recente current_temperature naar Home Assistant', async () => {
+test('actieve automatische Warmte stuurt niet zonder recente current_temperature naar Home Assistant', async () => {
   const input = fixture();
   input.thermal.mode = 'active';
   input.thermal.rooms[0].temperatureEntity = 'climate.cv';
@@ -160,8 +208,8 @@ test('actieve Warmte stuurt het Tado-doel zonder recente current_temperature naa
 
   await runner.tick();
 
-  assert.deepEqual(sent, [{ entityId: 'climate.cv', service: 'climate.set_temperature', value: 21 }]);
-  assert.equal(runner.status().decisions[0].status, 'sent');
+  assert.deepEqual(sent, []);
+  assert.equal(runner.status().decisions[0].status, 'blocked');
 });
 
 test('een bron heeft een gekoppelde regelkamer, bestaande configuraties blijven monitor-only', () => {
@@ -309,6 +357,7 @@ test('zonneboost geeft altijd basis 21 plus 1, nooit telkens een extra graad bov
 test('gezamenlijke afwezigheid verlaagt een expliciet gekozen kamer zonder zonneboost', () => {
   const input = sunnyFixture();
   input.thermal.rooms[0].presenceControl = true;
+  input.entities.find(entity => entity.id === 'sensor.temperature').state = '16';
   input.preferences = { presenceEntities: ['person.first', 'person.second'], presenceMode: 'any', awayC: 17 };
   for (const id of input.preferences.presenceEntities) input.entities.push({ id, domain: 'person', state: 'not_home', available: true, reportedAt: new Date(now).toISOString() });
   input.solarMemory = new Map([['cv', { active: true, basePower: 0 }]]);
@@ -322,6 +371,7 @@ test('gezamenlijke afwezigheid verlaagt een expliciet gekozen kamer zonder zonne
 
 test('de aangesloten runner neemt gezamenlijke aanwezigheid mee in het werkelijke thermostaatdoel', async () => {
   const input = fixture(); input.thermal.mode = 'active'; input.thermal.rooms[0].presenceControl = true;
+  input.entities[0].state = '16';
   input.entities.push({ id: 'person.first', domain: 'person', state: 'not_home', available: true, reportedAt: new Date(now).toISOString() });
   const snapshot = { control: defaultRules, thermal: input.thermal, mappings: {}, preferences: { presenceEntities: ['person.first'], presenceMode: 'any', awayC: 17 } };
   const sent = [];

@@ -120,6 +120,8 @@ export function normalizeStates(states) {
     minTempC: typeof state.attributes.min_temp === 'number' ? state.attributes.min_temp : null,
     maxTempC: typeof state.attributes.max_temp === 'number' ? state.attributes.max_temp : null,
     targetStepC: typeof state.attributes.target_temp_step === 'number' ? state.attributes.target_temp_step : null,
+    fanMode: typeof state.attributes.fan_mode === 'string' ? state.attributes.fan_mode : null,
+    fanModes: Array.isArray(state.attributes.fan_modes) ? state.attributes.fan_modes.filter(mode => typeof mode === 'string' && mode.length <= 80) : [],
     available: !['unavailable', 'unknown'].includes(state.state),
     hvacAction: ['heating', 'cooling', 'idle', 'off', 'defrosting', 'drying', 'fan'].includes(state.attributes.hvac_action) ? state.attributes.hvac_action : null,
     targetTemperature: typeof state.attributes.temperature === 'number' ? state.attributes.temperature : null,
@@ -266,13 +268,15 @@ export async function executeRuleCommand(command, env = process.env, request = f
   if (!env.SUPERVISOR_TOKEN || env.CONTROL_ENABLED !== 'true') throw new Error('Live sturing is niet vrijgegeven.');
   const allowed = {
     'climate.set_temperature': ['climate', 'temperature'], 'climate.set_hvac_mode': ['climate', 'hvac_mode'],
+    'climate.set_fan_mode': ['climate', 'fan_mode'],
     'number.set_value': ['number', 'value'], 'switch.turn_on': ['switch', null], 'switch.turn_off': ['switch', null],
     'lock.lock': ['lock', null], 'lock.unlock': ['lock', null]
   };
   const action = allowed[command.service];
   if (!action || !new RegExp(`^${action[0]}\\.[a-z0-9_]+$`).test(command.entityId)) throw new Error('Opdracht niet toegestaan.');
   if (action[1] === 'temperature' && (typeof command.value !== 'number' || !Number.isFinite(command.value) || command.value < 12 || command.value > 26)) throw new Error('Temperatuur buiten grenzen.');
-  if (action[1] === 'hvac_mode' && !['heat', 'off'].includes(command.value)) throw new Error('Modus niet toegestaan.');
+  if (action[1] === 'hvac_mode' && !['heat', 'cool', 'off'].includes(command.value)) throw new Error('Modus niet toegestaan.');
+  if (action[1] === 'fan_mode' && (typeof command.value !== 'string' || !command.value.trim() || command.value.length > 80)) throw new Error('Ventilatorstand niet toegestaan.');
   if (action[1] === 'value' && (typeof command.value !== 'number' || !Number.isFinite(command.value) || Math.abs(command.value) > 10000)) throw new Error('Waarde buiten grenzen.');
   const data = { entity_id: command.entityId };
   if (action[1]) data[action[1]] = command.value;
