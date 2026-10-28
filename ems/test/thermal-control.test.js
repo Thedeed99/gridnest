@@ -152,16 +152,29 @@ test('runner voert een handmatig doel zonder bron alleen naar die climate-entite
   assert.deepEqual(sent, [{ entityId: 'climate.cv', service: 'climate.set_temperature', value: 19 }]);
 });
 
-test('automatische stand koelt met de airco en zet een CV zonder koelstand uit', () => {
+test('CV-profiel blijft verwarmen bij een warme kamer terwijl de airco koelt', () => {
   const input = fixture();
+  input.entities[1].hvacModes = ['off', 'heat', 'cool'];
   input.thermal.sources.push({ id: 'airco', name: 'Airco', entityId: 'climate.airco', profile: 'airco', controlEnabled: true, confirmed: true, controlRoomId: 'living', priority: 2, fanMode: null });
   input.thermal.rooms[0].sourceIds.push('airco');
   input.entities[0].state = '22';
   input.entities[1].state = 'heat';
   input.entities.push({ id: 'climate.airco', domain: 'climate', available: true, state: 'heat', targetTemperature: 20, hvacModes: ['off', 'heat', 'cool'], supportedFeatures: 9, minTempC: 16, maxTempC: 30, targetStepC: 0.5 });
   const plans = planThermal(input);
-  assert.deepEqual(plans.find(item => item.id === 'thermal:cv:mode').command, { entityId: 'climate.cv', service: 'climate.set_hvac_mode', value: 'off' });
+  assert.deepEqual(plans.find(item => item.id === 'thermal:cv:temperature').command, { entityId: 'climate.cv', service: 'climate.set_temperature', value: 21 });
+  assert.equal(plans.find(item => item.id === 'thermal:cv:mode'), undefined);
   assert.deepEqual(plans.find(item => item.id === 'thermal:airco:mode').command, { entityId: 'climate.airco', service: 'climate.set_hvac_mode', value: 'cool' });
+});
+
+test('handmatig lager doel naar radiator-CV stuurt setpoint zonder uit- of koelmodus', () => {
+  const input = fixture();
+  input.thermal.sources[0].profile = 'radiators';
+  input.entities[0].state = '19.7';
+  input.entities[1] = { ...input.entities[1], state: 'heat', targetTemperature: null, hvacModes: ['off', 'heat', 'cool'] };
+  input.thermal.rooms[0].targetC = 18.5;
+  const plans = planThermal({ ...input, manualAction: true, manualRoomId: 'living' });
+  assert.deepEqual(plans.find(item => item.id === 'thermal:cv:temperature').command, { entityId: 'climate.cv', service: 'climate.set_temperature', value: 18.5 });
+  assert.equal(plans.find(item => item.id === 'thermal:cv:mode'), undefined);
 });
 
 test('automatische stand verwarmt of koelt buiten een deadband van 0,5 graden', () => {
@@ -201,9 +214,10 @@ test('kamerspecifieke person-aanwezigheid stuurt het kamerdoel naar comfort of a
   assert.doesNotThrow(() => validateThermal(input.thermal, input.entities));
   assert.equal(planThermal(input)[0].command.value, 21);
   input.entities.find(entity => entity.id === 'person.resident').state = 'not_home';
-  assert.equal(planThermal(input)[0].command, null);
+  assert.equal(planThermal(input)[0].command.value, 17);
   input.thermal.rooms[0].awayC = 19;
-  assert.equal(planThermal(input)[0].command, null);
+  input.thermal.rooms[0].awayC = 18;
+  assert.equal(planThermal(input)[0].command.value, 18);
 });
 
 test('aanwezigheid gebruikt alleen de status en valt bij een onbruikbare kamersensor terug op Mijn wensen', () => {
@@ -215,7 +229,7 @@ test('aanwezigheid gebruikt alleen de status en valt bij een onbruikbare kamerse
     { id: 'binary_sensor.room_presence', domain: 'binary_sensor', deviceClass: 'presence', available: false, state: 'unavailable' },
     { id: 'person.resident', domain: 'person', available: true, state: 'not_home', reportedAt: '2026-10-11T00:00:00Z' }
   );
-  assert.equal(planThermal(input)[0].command, null);
+  assert.equal(planThermal(input)[0].command.value, 16);
   input.entities[3].state = 'home';
   assert.equal(planThermal(input)[0].command.value, 21);
 });
