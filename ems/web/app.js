@@ -1150,18 +1150,18 @@ function roomCard(room, config, live, compact = false) {
     status.className = `room-status status-${value}`;
     status.textContent = labels[value] ?? labels.missing;
   });
-  card.append(header, temperatures, status);
+  const stateRow = element('div', 'room-state-row');
+  stateRow.append(status);
   const controllableSources = config.sources.filter(source => room.sourceIds.includes(source.id) && source.controlEnabled && source.entityId);
   if (controllableSources.length) {
-    const heatToggle = element('label', 'room-heat-toggle');
+    const heatToggle = element('label', 'checkbox-field room-heat-toggle');
     const input = element('input');
     input.type = 'checkbox';
-    input.setAttribute('role', 'switch');
     input.checked = room.heatingEnabled !== false;
-    const label = element('span', '', input.checked ? 'Verwarming aan' : 'Verwarming uit');
+    const label = element('span', '', input.checked ? 'Klimaat aan' : 'Klimaat uit');
     const updateLabel = () => {
-      label.textContent = input.checked ? 'Verwarming aan' : 'Verwarming uit';
-      input.setAttribute('aria-label', input.checked ? `Verwarming voor ${room.name} uitschakelen` : `Verwarming voor ${room.name} inschakelen`);
+      label.textContent = input.checked ? 'Klimaat aan' : 'Klimaat uit';
+      input.setAttribute('aria-label', input.checked ? `Klimaatregeling voor ${room.name} uitschakelen` : `Klimaatregeling voor ${room.name} inschakelen`);
     };
     updateLabel();
     heatToggle.append(input, label);
@@ -1178,7 +1178,7 @@ function roomCard(room, config, live, compact = false) {
         const issue = result.controlStatus?.decisions?.find(decision => decision.origin === 'thermal' && sourceIds.includes(decision.sourceId) && ['blocked', 'paused', 'waiting'].includes(decision.status));
         if (issue) notify(`Instelling opgeslagen; ${issue.reason}`, true);
         else if (result.thermal.mode !== 'active') notify('Instelling opgeslagen; zet Warmteregelaar op Actief om apparaten te bedienen.');
-        else notify(heatingEnabled ? `Verwarming voor ${room.name} ingeschakeld.` : `Verwarming voor ${room.name} uitgeschakeld.`);
+        else notify(heatingEnabled ? `Klimaatregeling voor ${room.name} ingeschakeld.` : `Klimaatregeling voor ${room.name} uitgeschakeld.`);
       } catch (error) {
         input.checked = !heatingEnabled;
         input.disabled = false;
@@ -1186,8 +1186,9 @@ function roomCard(room, config, live, compact = false) {
         notify(error.message, true);
       }
     });
-    card.append(heatToggle);
+    stateRow.append(heatToggle);
   }
+  card.append(header, temperatures, stateRow);
   const solarPlan = data.controlStatus?.decisions?.find(decision => decision.origin === 'thermal' && config.sources.some(source => source.id === decision.sourceId && source.controlRoomId === room.id) && decision.targetC > room.targetC);
   if (solarPlan) card.append(liveText('p', 'solar-target', () => {
     const decision = data.controlStatus?.decisions?.find(item => item.origin === 'thermal' && item.roomName === room.name && item.targetC > (data.thermal?.rooms.find(value => value.id === room.id)?.targetC ?? 0));
@@ -1206,10 +1207,42 @@ function roomCard(room, config, live, compact = false) {
     const source = config.sources.find(item => item.id === id);
     if (!source) continue;
     const row = element('li');
-    row.append(element('span', '', source.name), liveText('span', 'muted', () => {
+    row.append(element('span', 'room-source-name', source.name));
+    row.append(liveText('span', 'muted room-source-status', () => {
       const current = data.thermalReadings?.sources?.find(item => item.id === id);
       return climateStatus(current ?? {});
     }));
+    const climate = data.entities.find(entity => entity.id === source.entityId);
+    if (source.profile === 'airco' && climate?.fanModes?.length) {
+      const fanLabel = element('label', 'room-fan-control');
+      const fanTitle = element('span', '', 'Ventilator');
+      const fanSelect = element('select', 'room-fan-select');
+      fanSelect.setAttribute('aria-label', `Ventilatorstand voor ${source.name}`);
+      const keepFan = element('option', '', 'Thermostaatstand behouden'); keepFan.value = ''; fanSelect.append(keepFan);
+      for (const fanMode of climate.fanModes) { const option = element('option', '', fanMode); option.value = fanMode; fanSelect.append(option); }
+      fanSelect.value = source.fanMode ?? '';
+      fanSelect.addEventListener('change', async () => {
+        const fanMode = fanSelect.value || null;
+        fanSelect.disabled = true;
+        const next = structuredClone(data.thermal);
+        const targetSource = next.sources.find(item => item.id === source.id);
+        if (!targetSource) return;
+        targetSource.fanMode = fanMode;
+        try {
+          const result = await saveThermal(next);
+          const decision = result.controlStatus?.decisions?.find(item => item.id === `thermal:${source.id}:fan`);
+          if (decision?.status === 'blocked') notify(decision.reason, true);
+          else if (result.thermal.mode !== 'active') notify(fanMode ? `Ventilatorstand ${fanMode} opgeslagen voor Proefmodus.` : 'De thermostaat bepaalt de ventilatorstand weer.');
+          else notify(fanMode ? `Ventilatorstand ${fanMode} ingesteld.` : 'De thermostaat bepaalt de ventilatorstand weer.');
+        } catch (error) {
+          fanSelect.value = source.fanMode ?? '';
+          fanSelect.disabled = false;
+          notify(error.message, true);
+        }
+      });
+      fanLabel.append(fanTitle, fanSelect);
+      row.append(fanLabel);
+    }
     sources.append(row);
   }
   if (!room.sourceIds.length) sources.append(element('li', 'muted', 'Geen warmtebron gekoppeld'));
@@ -1461,7 +1494,7 @@ function editThermal(kind, id = null, floor = '') {
     if (!config.sources.length) sources.append(element('p', 'muted', 'Geen warmtebronnen beschikbaar.'));
     fields.append(sources);
   } else {
-    entityField('entityId', 'Verwarmingsentiteit', original?.entityId, entity => entity.domain === 'climate');
+    const sourceEntity = entityField('entityId', 'Verwarmingsentiteit', original?.entityId, entity => entity.domain === 'climate');
     const profileSelect = element('select');
     for (const profile of data.heatingProfiles ?? []) {
       const option = element('option', '', profile.name);
@@ -1470,10 +1503,34 @@ function editThermal(kind, id = null, floor = '') {
     }
     profileSelect.value = original?.profile ?? 'unspecified';
     addField('profile', 'Afgiftesysteem', profileSelect);
+    const fanModeFields = element('div');
+    let selectedFanMode = original?.fanMode ?? '';
+    const updateFanMode = () => {
+      fanModeFields.replaceChildren();
+      const climate = data.entities.find(entity => entity.id === sourceEntity.value);
+      if (profileSelect.value !== 'airco') { selectedFanMode = ''; return; }
+      const modes = climate?.fanModes ?? [];
+      if (!modes.length) {
+        fanModeFields.append(element('p', 'muted', 'Deze airco meldt geen instelbare ventilatorstanden.'));
+        selectedFanMode = '';
+        return;
+      }
+      if (selectedFanMode && !modes.includes(selectedFanMode)) selectedFanMode = '';
+      const fanModeSelect = element('select');
+      const preserve = element('option', '', 'Thermostaatinstelling behouden'); preserve.value = ''; fanModeSelect.append(preserve);
+      for (const fanMode of modes) { const option = element('option', '', fanMode); option.value = fanMode; fanModeSelect.append(option); }
+      fanModeSelect.id = 'thermal-fan-mode'; fanModeSelect.name = 'fanMode'; fanModeSelect.value = selectedFanMode;
+      fanModeSelect.addEventListener('change', () => { selectedFanMode = fanModeSelect.value; });
+      const label = element('label', 'mapping-setting'); label.htmlFor = fanModeSelect.id;
+      label.append(element('span', '', 'Ventilatorstand'), fanModeSelect); fanModeFields.append(label);
+    };
+    fields.append(fanModeFields);
     const advice = element('p', 'profile-advice');
     const updateAdvice = () => { advice.textContent = data.heatingProfiles?.find(profile => profile.id === profileSelect.value)?.advice ?? ''; };
-    profileSelect.addEventListener('change', updateAdvice);
+    profileSelect.addEventListener('change', () => { updateAdvice(); updateFanMode(); });
+    sourceEntity.addEventListener('change', updateFanMode);
     updateAdvice();
+    updateFanMode();
     fields.append(advice);
     const controlRoom = element('select');
     const none = element('option', '', 'Geen regelkamer'); none.value = ''; controlRoom.append(none);
@@ -1567,7 +1624,7 @@ function editThermal(kind, id = null, floor = '') {
         targetC: Number(values.get('targetC')), presenceControl: values.has('presenceControl'),
         heatingEnabled: original?.heatingEnabled ?? false,
         awayC: values.get('awayC') === '' ? null : Number(values.get('awayC')), sourceIds: values.getAll('sourceIds')
-      } : { ...original, id: id ?? createId(), name: values.get('name'), entityId: values.get('entityId') || null, profile: values.get('profile') };
+      } : { ...original, id: id ?? createId(), name: values.get('name'), entityId: values.get('entityId') || null, profile: values.get('profile'), fanMode: values.get('fanMode') || null };
       if (!isRoom) {
         item.controlEnabled = values.has('controlEnabled'); item.confirmed = values.has('confirmed');
         item.controlRoomId = values.get('controlRoomId') || null; item.priority = Number(values.get('priority'));

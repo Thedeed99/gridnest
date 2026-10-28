@@ -234,6 +234,17 @@ test('transport gebruikt alleen toegestane services via de Supervisor en weigert
     assert.deepEqual(JSON.parse(options.body), { entity_id: 'number.limit', value: 70 });
     return { ok: true };
   });
+  await executeRuleCommand({ entityId: 'climate.airco', service: 'climate.set_fan_mode', value: 'Low' }, env, async (url, options) => {
+    assert.equal(url, 'http://supervisor/core/api/services/climate/set_fan_mode');
+    assert.deepEqual(JSON.parse(options.body), { entity_id: 'climate.airco', fan_mode: 'Low' });
+    return { ok: true };
+  });
+  await executeRuleCommand({ entityId: 'climate.airco', service: 'climate.set_hvac_mode', value: 'cool' }, env, async (url, options) => {
+    assert.equal(url, 'http://supervisor/core/api/services/climate/set_hvac_mode');
+    assert.deepEqual(JSON.parse(options.body), { entity_id: 'climate.airco', hvac_mode: 'cool' });
+    return { ok: true };
+  });
+  await assert.rejects(executeRuleCommand({ entityId: 'climate.airco', service: 'climate.set_fan_mode', value: '' }, env));
   await assert.rejects(executeRuleCommand({ entityId: 'switch.ev', service: 'homeassistant.restart', value: 0 }, env));
   await assert.rejects(executeRuleCommand({ entityId: 'climate.cv', service: 'climate.set_temperature', value: 50 }, env));
   await assert.rejects(executeRuleCommand({ entityId: 'switch.ev', service: 'switch.turn_on', value: 'on' }, {}));

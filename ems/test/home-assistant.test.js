@@ -225,3 +225,9 @@ test('demo dynamische stroomprijzen bevatten een vooruitblik van 24 uur per kwar
     assert.ok(forecast.every(point => Number.isFinite(point.value)));
   }
 });
+
+test('climate-entiteiten behouden ondersteunde ventilatorstanden en huidige stand', () => {
+  const climate = normalizeStates([state('climate.airco', '', 'heat', { fan_mode: 'Auto', fan_modes: ['Auto', 'Low', 'Mid', 'High'] })])[0];
+  assert.equal(climate.fanMode, 'Auto');
+  assert.deepEqual(climate.fanModes, ['Auto', 'Low', 'Mid', 'High']);
+});

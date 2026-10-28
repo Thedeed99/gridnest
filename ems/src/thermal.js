@@ -1,6 +1,6 @@
 import { compatible, roles } from './home-assistant.js';
 import { thermalSchema } from './store.js';
-import { planRules } from './rules.js';
+import { isFresh, planRules } from './rules.js';
 import { solarTarget } from './thermal-solar.js';
 
 export function entityPresence(entity) {
@@ -41,6 +41,7 @@ export function validateThermal(input, entities, mappings = {}) {
   const find = id => entities.find(entity => entity.id === id);
   for (const source of thermal.sources) {
     if (source.entityId && find(source.entityId)?.domain !== 'climate') throw new Error('Een warmtebron moet een bestaande climate-entiteit gebruiken.');
+    if (source.fanMode && (source.profile !== 'airco' || !find(source.entityId)?.fanModes?.includes(source.fanMode))) throw new Error('Kies een ventilatorstand die door deze airco wordt ondersteund.');
     if (source.solar.enabled && (!source.solar.powerEntity || !compatible(roles[0], find(source.solar.powerEntity) ?? {}))) throw new Error('Zonnevoorverwarming vereist een eigen aircovermogenssensor in W of kW.');
     if (source.solar.enabled && ['solar', 'gridPower', 'gridImport', 'gridExport', 'totalConsumption', 'batteryPower'].some(role => mappings[role] === source.solar.powerEntity)) throw new Error('Gebruik de eigen aircovermogensmeter, geen net-, productie-, woning- of batterijmeter.');
   }
@@ -113,16 +114,21 @@ export function planThermal({ thermal, settings, entities, mappings, temperature
       return { ...mode, definition: modeDefinition, sourceId: source.id, origin: 'thermal', roomName: room.name,
         reason: mode.status === 'blocked' ? mode.reason : mode.command ? commandReason : stableReason };
     };
+    const planFanMode = () => {
+      const fanDefinition = { ...definition, id: `thermal:${source.id}:fan`, action: { type: 'climate_fan_mode', entityId: source.entityId, value: source.fanMode, otherwise: source.fanMode } };
+      const blockedFan = reason => ({ id: fanDefinition.id, name: source.name, sourceId: source.id, origin: 'thermal', priority: definition.priority, status: 'blocked', observed: entity?.fanMode ?? null, command: null, reason, definition: fanDefinition });
+      if (!entity?.available || !entity.fanModes?.includes(source.fanMode)) return blockedFan('De gekozen ventilatorstand wordt niet meer door deze airco ondersteund.');
+      if (!entity.fanMode || !entity.fanModes.includes(entity.fanMode)) return blockedFan('De huidige ventilatorstand is niet beschikbaar.');
+      const command = entity.fanMode === source.fanMode ? null : { entityId: entity.id, service: 'climate.set_fan_mode', value: source.fanMode };
+      return { id: fanDefinition.id, name: source.name, sourceId: source.id, origin: 'thermal', priority: definition.priority,
+        status: command ? 'planned' : 'stable', observed: entity.fanMode, command,
+        reason: command ? `Ventilatorstand wijzigen naar ${source.fanMode}.` : `Ventilatorstand ${source.fanMode} bevestigd.`, definition: fanDefinition };
+    };
     if (room.heatingEnabled === false) {
-      plans.push(planMode('off', `${room.name}: verwarming uitschakelen.`, `${room.name}: verwarming staat uit.`));
+      plans.push(planMode('off', `${room.name}: klimaatregeling uitschakelen.`, `${room.name}: klimaatregeling staat uit.`));
       continue;
     }
     if (source.profile === 'unspecified') { plans.push(blocked('Kies een verwarmingsprofiel voor deze warmtebron.')); continue; }
-    if (!entity?.hvacModes?.includes('heat')) { plans.push(blocked('Deze bron bevestigt geen verwarmmodus.')); continue; }
-    if (!['heat', 'off'].includes(entity.state)) {
-      plans.push(planMode('heat', `${room.name}: eerst naar verwarmmodus schakelen.`, `${room.name}: verwarmmodus is actief.`));
-      continue;
-    }
     let baseTarget = room.targetC;
     let occupied = null;
     if (room.presenceControl) {
@@ -132,7 +138,25 @@ export function planThermal({ thermal, settings, entities, mappings, temperature
       if (occupied === null || !Number.isFinite(awayC)) { plans.push(blocked('Aanwezigheidsregeling vereist bekende, recente aanwezigheid en een afwezigtemperatuur.')); continue; }
       if (!occupied) baseTarget = Math.min(room.targetC, awayC);
     }
-    const solar = room.presenceControl && occupied === false ? { targetC: baseTarget, active: false, next: { active: false }, reason: 'Afwezig: begrensd afwezigdoel, geen zonneboost.' } : solarTarget({ source, baseTarget, entities, mappings, now, maxAge: settings.maxAgeSeconds, previous: solarMemory.get(source.id), allowStart: !solarOwner || solarOwner === source.id });
+    const temperatureEntity = entities.find(item => item.id === room.temperatureEntity) ?? entity;
+    const currentC = isFresh(temperatureEntity, now, settings.maxAgeSeconds) && temperatureEntity.domain === 'sensor' && temperatureEntity.unit === '°C' && temperatureEntity.state.trim() !== '' && Number.isFinite(Number(temperatureEntity.state))
+      ? Number(temperatureEntity.state)
+      : isFresh(temperatureEntity, now, settings.maxAgeSeconds) && temperatureEntity.domain === 'climate' && Number.isFinite(temperatureEntity.currentTemperature) ? temperatureEntity.currentTemperature : null;
+    if (!Number.isFinite(currentC)) { plans.push(blocked('Automatische verwarming/koeling vereist een recente kamertemperatuur.')); continue; }
+    const desiredMode = currentC < baseTarget - 0.5 ? 'heat' : currentC > baseTarget + 0.5 ? 'cool' : ['heat', 'cool'].includes(entity.state) ? entity.state : 'off';
+    if (desiredMode === 'off') { plans.push(planMode('off', `${room.name}: doel bereikt; klimaatregeling uitschakelen.`, `${room.name}: doel bereikt; klimaatregeling blijft uit.`)); continue; }
+    if (!entity?.hvacModes?.includes(desiredMode)) {
+      if (entity?.hvacModes?.includes('off')) plans.push(planMode('off', `${room.name}: bron ondersteunt ${desiredMode === 'cool' ? 'koelen' : 'verwarmen'} niet; uitschakelen.`, `${room.name}: bron ondersteunt ${desiredMode === 'cool' ? 'koelen' : 'verwarmen'} niet en staat uit.`));
+      else plans.push(blocked(`Deze bron ondersteunt ${desiredMode === 'cool' ? 'koelen' : 'verwarmen'} niet en kan niet veilig worden uitgeschakeld.`));
+      continue;
+    }
+    if (entity.state !== desiredMode && entity.state !== 'off') {
+      plans.push(planMode(desiredMode, `${room.name}: eerst naar ${desiredMode === 'cool' ? 'koel' : 'verwarm'}modus schakelen.`, `${room.name}: gewenste klimaatmodus is actief.`));
+      continue;
+    }
+    const solar = desiredMode === 'cool' ? { targetC: baseTarget, active: false, next: { active: false }, reason: 'Koelen: zonnevoorverwarming niet toegepast.' }
+      : room.presenceControl && occupied === false ? { targetC: baseTarget, active: false, next: { active: false }, reason: 'Afwezig: begrensd afwezigdoel, geen zonneboost.' }
+        : solarTarget({ source, baseTarget, entities, mappings, now, maxAge: settings.maxAgeSeconds, previous: solarMemory.get(source.id), allowStart: !solarOwner || solarOwner === source.id });
     if (source.solar?.enabled && !solarOwner && (solar.active || solar.next.candidate === true)) solarOwner = source.id;
     if (solar.active && Number.isFinite(entity.targetStepC) && entity.targetStepC > 0 && Number.isFinite(entity.maxTempC)) solar.targetC = Math.max(room.targetC, Math.floor(Math.min(solar.targetC, entity.maxTempC, 26) / entity.targetStepC) * entity.targetStepC);
     definition.action.value = definition.action.otherwise = solar.targetC;
@@ -140,7 +164,9 @@ export function planThermal({ thermal, settings, entities, mappings, temperature
     plans.push({ ...decision, definition, sourceId: source.id, origin: 'thermal', roomName: room.name, solarNext: solar.next, targetC: solar.targetC,
       reason: decision.status === 'blocked' ? decision.reason : `${room.name}: doel ${solar.targetC} graden. ${solar.reason}` });
     if (decision.status !== 'stable') continue;
-    plans.push(planMode('heat', 'Doel bevestigd; verwarmmodus inschakelen.', 'De eigen thermostaat regelt op het ingestelde kamerdoel.'));
+    const modePlan = planMode(desiredMode, `Doel bevestigd; ${desiredMode === 'cool' ? 'koelmodus' : 'verwarmmodus'} inschakelen.`, 'De eigen thermostaat regelt op het ingestelde kamerdoel.');
+    plans.push(modePlan);
+    if (modePlan.status === 'stable' && source.fanMode) plans.push(planFanMode());
   }
   return plans;
 }

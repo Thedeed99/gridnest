@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.6 - 2026-10-28
+
+- Kies automatisch verwarmen of koelen op basis van kamertemperatuur en doel, met een deadband van 0,5 °C; schakelt bronnen zonder koelstand uit.
+- Voeg een optionele ventilatorstand toe aan airco-warmtebronnen; alleen door Home Assistant ondersteunde standen zijn beschikbaar.
+
 ## 2.0.5 - 2026-10-28
 
 - Voeg een aparte warmte-aan/uitbediening per kamer toe; bij uit schakelt de gekoppelde thermostaat uit en bij aan volgt de warmteregeling het kamerdoel.

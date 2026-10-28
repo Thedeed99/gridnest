@@ -13,7 +13,7 @@ export const actionTypes = [
 ];
 
 const entityId = z.string().regex(/^[a-z_]+\.[a-z0-9_]+$/);
-const actionValue = z.union([z.number().finite(), z.enum(['on', 'off', 'heat'])]);
+const actionValue = z.union([z.number().finite(), z.enum(['on', 'off', 'heat', 'cool'])]);
 const otherwiseValue = z.union([actionValue, z.literal('keep')]);
 export const rulesSchema = z.object({
   mode: z.enum(['off', 'preview', 'active']).default('off'),
@@ -51,7 +51,7 @@ export const rulesSchema = z.object({
     for (const value of [rule.action.value, rule.action.otherwise]) {
       if (value === 'keep') continue;
       const type = rule.action.type;
-      const valid = ['ev_enable', 'battery_enable', 'switch_control'].includes(type) ? ['on', 'off'].includes(value) : type === 'climate_mode' ? ['heat', 'off'].includes(value) :
+      const valid = ['ev_enable', 'battery_enable', 'switch_control'].includes(type) ? ['on', 'off'].includes(value) : type === 'climate_mode' ? ['heat', 'cool', 'off'].includes(value) :
         typeof value === 'number' && (type === 'climate_temperature' ? value >= 12 && value <= 26 : type === 'ev_current' ? value >= 6 && value <= 32 : ['pv_limit', 'battery_soc_limit'].includes(type) ? value >= 0 && value <= 100 : Math.abs(value) <= 10000);
       if (!valid) context.addIssue({ code: 'custom', message: 'Actiewaarde valt buiten de toegestane grenzen.' });
     }
@@ -160,7 +160,7 @@ export function planRules({ settings, entities, mappings, temperatureUnit, now =
     let observed;
     if (action.type === 'climate_temperature') {
       const targetStepC = entity.targetStepC ?? 0.1;
-      if (temperatureUnit !== '°C' || !(entity.supportedFeatures & 1) || !Number.isFinite(targetStepC) || targetStepC <= 0 || !Number.isFinite(entity.minTempC) || !Number.isFinite(entity.maxTempC) || !['heat', 'off'].includes(entity.state)) return blocked('Celsius, temperatuurbediening, apparaatgrenzen en verwarmmodus/off moeten bevestigd zijn.');
+      if (temperatureUnit !== '°C' || !(entity.supportedFeatures & 1) || !Number.isFinite(targetStepC) || targetStepC <= 0 || !Number.isFinite(entity.minTempC) || !Number.isFinite(entity.maxTempC) || !['heat', 'cool', 'off'].includes(entity.state)) return blocked('Celsius, temperatuurbediening, apparaatgrenzen en klimaatmodus heat/cool/off moeten bevestigd zijn.');
       value = Math.round(value / targetStepC) * targetStepC;
       if (value < Math.max(12, entity.minTempC) || value > Math.min(26, entity.maxTempC)) return blocked('Temperatuurdoel buiten apparaatgrenzen.');
       observed = entity.targetTemperature;

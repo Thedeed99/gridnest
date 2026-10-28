@@ -103,6 +103,7 @@ export const thermalSchema = z.object({
     profile: z.enum(heatingProfiles.map(profile => profile.id)),
     controlEnabled: z.boolean().default(false), confirmed: z.boolean().default(false),
     controlRoomId: itemIdSchema.nullable().default(null),
+    fanMode: z.string().trim().min(1).max(80).nullable().default(null),
     priority: z.number().int().min(1).max(100).default(50),
     solar: solarSchema.default({})
   }).strict()).max(40),
