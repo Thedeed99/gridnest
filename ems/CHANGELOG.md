@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.5 - 2026-10-28
+
+- Voeg een aparte warmte-aan/uitbediening per kamer toe; bij uit schakelt de gekoppelde thermostaat uit en bij aan volgt de warmteregeling het kamerdoel.
+- Verwijder de pauze na handmatige warmtebronmoduswijzigingen; actieve Warmte beoordeelt de bron weer in de volgende regelcyclus.
+- Voeg meerdere metingen aan een stroomregel toe en kies of alle metingen of minstens één meting de voorwaarden moet laten kloppen.
+- Gebruik bij een ontbrekend `target_temp_step` de Home Assistant-precisie van 0,1 °C voor ondersteunde klimaatentiteiten.
+
 ## 2.0.4 - 2026-10-27
 
 - Pauzeer stroomregels niet meer wanneer een schakelaar handmatig wordt gewijzigd; de regel beoordeelt de situatie opnieuw bij de volgende cyclus.

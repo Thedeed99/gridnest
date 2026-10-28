@@ -1151,6 +1151,43 @@ function roomCard(room, config, live, compact = false) {
     status.textContent = labels[value] ?? labels.missing;
   });
   card.append(header, temperatures, status);
+  const controllableSources = config.sources.filter(source => room.sourceIds.includes(source.id) && source.controlEnabled && source.entityId);
+  if (controllableSources.length) {
+    const heatToggle = element('label', 'room-heat-toggle');
+    const input = element('input');
+    input.type = 'checkbox';
+    input.setAttribute('role', 'switch');
+    input.checked = room.heatingEnabled !== false;
+    const label = element('span', '', input.checked ? 'Verwarming aan' : 'Verwarming uit');
+    const updateLabel = () => {
+      label.textContent = input.checked ? 'Verwarming aan' : 'Verwarming uit';
+      input.setAttribute('aria-label', input.checked ? `Verwarming voor ${room.name} uitschakelen` : `Verwarming voor ${room.name} inschakelen`);
+    };
+    updateLabel();
+    heatToggle.append(input, label);
+    input.addEventListener('change', async () => {
+      const heatingEnabled = input.checked;
+      input.disabled = true;
+      const next = structuredClone(data.thermal);
+      const targetRoom = next.rooms.find(item => item.id === room.id);
+      if (!targetRoom) return;
+      targetRoom.heatingEnabled = heatingEnabled;
+      try {
+        const result = await saveThermal(next);
+        const sourceIds = result.thermal.sources.filter(source => source.controlRoomId === room.id && source.controlEnabled).map(source => source.id);
+        const issue = result.controlStatus?.decisions?.find(decision => decision.origin === 'thermal' && sourceIds.includes(decision.sourceId) && ['blocked', 'paused', 'waiting'].includes(decision.status));
+        if (issue) notify(`Instelling opgeslagen; ${issue.reason}`, true);
+        else if (result.thermal.mode !== 'active') notify('Instelling opgeslagen; zet Warmteregelaar op Actief om apparaten te bedienen.');
+        else notify(heatingEnabled ? `Verwarming voor ${room.name} ingeschakeld.` : `Verwarming voor ${room.name} uitgeschakeld.`);
+      } catch (error) {
+        input.checked = !heatingEnabled;
+        input.disabled = false;
+        updateLabel();
+        notify(error.message, true);
+      }
+    });
+    card.append(heatToggle);
+  }
   const solarPlan = data.controlStatus?.decisions?.find(decision => decision.origin === 'thermal' && config.sources.some(source => source.id === decision.sourceId && source.controlRoomId === room.id) && decision.targetC > room.targetC);
   if (solarPlan) card.append(liveText('p', 'solar-target', () => {
     const decision = data.controlStatus?.decisions?.find(item => item.origin === 'thermal' && item.roomName === room.name && item.targetC > (data.thermal?.rooms.find(value => value.id === room.id)?.targetC ?? 0));
@@ -1296,6 +1333,8 @@ function thermal() {
 
 function reportRoomTarget(roomId, result) {
   const config = result.thermal;
+  const room = config.rooms.find(item => item.id === roomId);
+  if (room?.heatingEnabled === false) { notify(`Kamerdoel opgeslagen; verwarming voor ${room.name} staat uit.`); return; }
   if (config.mode !== 'active') { notify(`Kamerdoel opgeslagen; Warmte staat op ${{ off: 'Uit', preview: 'Proefmodus' }[config.mode] ?? config.mode} en stuurt niet.`); return; }
   const sources = config.sources.filter(source => source.controlRoomId === roomId && source.controlEnabled);
   const decisions = (result.controlStatus?.decisions ?? []).filter(decision => sources.some(source => source.id === decision.sourceId));
@@ -1526,6 +1565,7 @@ function editThermal(kind, id = null, floor = '') {
         id: id ?? createId(), name: values.get('name'), floor: values.get('floor'),
         temperatureEntity: values.get('temperatureEntity') || null, presenceEntity: values.get('presenceEntity') || null,
         targetC: Number(values.get('targetC')), presenceControl: values.has('presenceControl'),
+        heatingEnabled: original?.heatingEnabled ?? false,
         awayC: values.get('awayC') === '' ? null : Number(values.get('awayC')), sourceIds: values.getAll('sourceIds')
       } : { ...original, id: id ?? createId(), name: values.get('name'), entityId: values.get('entityId') || null, profile: values.get('profile') };
       if (!isRoom) {
@@ -1668,7 +1708,7 @@ function rulesView() {
   const limits = element('details', 'control-limits');
   limits.append(element('summary', '', 'Grenzen en timing'));
   const fields = element('div', 'preference-fields');
-  for (const [key, title, min, max, step] of [['maxAgeSeconds', 'Maximale meetouderdom (seconden)', 60, 86400, 60], ['minIntervalSeconds', 'Minimale opdrachttijd (seconden)', 30, 3600, 30], ['manualHoldMinutes', 'Pauze na handmatige wijziging (minuten)', 5, 1440, 5], ['reserveSoc', 'Accureserve (%)', 10, 90, 1], ['maxSoc', 'Maximale acculading (%)', 20, 100, 1]]) {
+  for (const [key, title, min, max, step] of [['maxAgeSeconds', 'Maximale meetouderdom (seconden)', 60, 86400, 60], ['minIntervalSeconds', 'Minimale opdrachttijd (seconden)', 30, 3600, 30], ['reserveSoc', 'Accureserve (%)', 10, 90, 1], ['maxSoc', 'Maximale acculading (%)', 20, 100, 1]]) {
     const label = element('label', 'mapping-setting');
     label.htmlFor = `control-${key}`;
     label.append(element('span', '', title));
@@ -1730,7 +1770,7 @@ function rulesView() {
       : type.id === 'climate_mode' ? value === 'heat' ? 'verwarmmodus' : 'uitmodus'
       : type.id === 'battery_soc_limit' ? `${number(value)} %`
       : `${number(value)}${type.unit ? ` ${type.unit}` : ''}`;
-    row.append(title, element('p', 'rule-summary', `Als ${conditions.join(' én ')}`), element('p', 'rule-summary', `Dan ${rule.delayMinutes ? `na ${rule.delayMinutes} min wachten ` : ''}${actionLabel(rule.action.value)} · anders ${actionLabel(rule.action.otherwise)}`), element('p', 'muted', `${type.name} · ${actuator?.name ?? rule.action.entityId}`));
+    row.append(title, element('p', 'rule-summary', `Als ${conditions.join(rule.conditionMode === 'any' ? ' óf ' : ' én ')}`), element('p', 'rule-summary', `Dan ${rule.delayMinutes ? `na ${rule.delayMinutes} min wachten ` : ''}${actionLabel(rule.action.value)} · anders ${actionLabel(rule.action.otherwise)}`), element('p', 'muted', `${type.name} · ${actuator?.name ?? rule.action.entityId}`));
     list.append(row);
   }
   if (!data.control.rules.length) list.append(element('p', 'empty-state', 'Nog geen regels.'));
@@ -1776,6 +1816,7 @@ function editRule(id = null, presetType = 'ev_enable') {
           : { type: 'ev_enable', entityId: '', value: 'on', otherwise: 'off', batteryDirection: 'positive-charge' };
     draft = { id: createId(), name: presetType === 'pv_limit' ? 'Omvormer begrenzen' : '', priority: 50, enabled: false, confirmed: false, conditions: [{ entityId: '', operator: 'gt', value: 0 }], action: initialAction };
   }
+  draft.conditionMode ??= 'all';
   const dialog = element('dialog', 'thermal-dialog rule-dialog');
   dialog.setAttribute('aria-label', original ? 'Stroomregel bewerken' : 'Stroomregel toevoegen');
   const form = element('form');
@@ -1850,8 +1891,11 @@ function editRule(id = null, presetType = 'ev_enable') {
   field(fields, 'Prioriteit (1 = hoogste, 100 = laagste)', priority, 'rule-priority');
   const conditionSection = element('section', 'condition-section');
   const conditionHeader = element('div', 'section-heading');
-  const addCondition = toolButton('plus', 'Voorwaarde toevoegen', () => { if (draft.conditions.length < 5) { draft.conditions.push({ entityId: '', operator: 'gt', value: 0 }); renderConditions(); } });
-  conditionHeader.append(element('h3', '', 'Als alle voorwaarden kloppen'), addCondition);
+  const addCondition = toolButton('plus', 'Meting toevoegen', () => { if (draft.conditions.length < 5) { draft.conditions.push({ entityId: '', operator: 'gt', value: 0 }); renderConditions(); } });
+  conditionHeader.append(element('h3', '', 'Voorwaarden'), addCondition);
+  const conditionMode = select([['all', 'Alle metingen moeten kloppen'], ['any', 'Eén of meer metingen moeten kloppen']], draft.conditionMode);
+  conditionMode.addEventListener('change', () => { draft.conditionMode = conditionMode.value; });
+  field(conditionSection, 'Voorwaarden combineren', conditionMode, 'rule-condition-mode');
   const conditions = element('div'); conditionSection.append(conditionHeader, conditions); fields.append(conditionSection);
   function renderConditions() {
     conditions.replaceChildren(); addCondition.disabled = draft.conditions.length >= 5;

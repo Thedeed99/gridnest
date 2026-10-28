@@ -21,6 +21,31 @@ test('getekende netsensor stuurt laadstart bij export en laadstop bij afname', (
   assert.equal(planRules(state)[0].command.service, 'switch.turn_off');
 });
 
+test('stroomregel kan een actie uitvoeren als een van twee metingen klopt', () => {
+  const definition = {
+    ...rule('switch_control', 'switch.boiler', 'on', 'off'),
+    conditionMode: 'any',
+    conditions: [
+      { entityId: 'sensor.meter_one', operator: 'gt', value: 10 },
+      { entityId: 'sensor.meter_two', operator: 'gt', value: 10 }
+    ]
+  };
+  const settings = rulesSchema.parse({ ...defaultRules, rules: [definition] });
+  const entities = [entity('sensor.meter_one', 0), entity('sensor.meter_two', 0), entity('switch.boiler', 'on')];
+  const plan = () => planRules({ now, settings, entities, mappings: {}, temperatureUnit: '°C' })[0];
+
+  assert.equal(plan().command.service, 'switch.turn_off');
+  entities[2].state = 'off';
+  entities[0].state = '15';
+  assert.equal(plan().command.service, 'switch.turn_on');
+  entities[0].state = '0'; entities[1].state = '15';
+  assert.equal(plan().command.service, 'switch.turn_on');
+  entities[2].state = 'on';
+  entities[1].state = '0';
+  assert.equal(plan().command.service, 'switch.turn_off');
+  assert.equal(rulesSchema.parse({ ...defaultRules, rules: [rule('switch_control', 'switch.boiler', 'on', 'off')] }).rules[0].conditionMode, 'all');
+});
+
 test('oude of ontbrekende voorwaarde veroorzaakt nooit een anders-opdracht', () => {
   const state = input('ev_enable', 'switch.ev', 'on', 'off', entity('switch.ev', 'on'));
   state.entities[0].reportedAt = '2026-10-11T00:00:00Z';
@@ -146,6 +171,11 @@ test('thermostaatdoelen vereisen Celsius en bevestigde capabilities', () => {
   assert.equal(planRules(state)[0].command.value, 21);
   state.temperatureUnit = '°F';
   assert.equal(planRules(state)[0].command, null);
+});
+
+test('thermostaat zonder target_temp_step gebruikt Celsiusprecisie van Home Assistant', () => {
+  const state = input('climate_temperature', 'climate.tado', 19.5, 17, entity('climate.tado', 'heat', { targetTemperature: 18, minTempC: 5, maxTempC: 25, supportedFeatures: 385 }));
+  assert.equal(planRules(state)[0].command.value, 19.5);
 });
 
 test('bedieningsregels staan standaard uit en vragen bevestiging', () => {
