@@ -1,8 +1,13 @@
 # Changelog
 
+## 2.0.10 - 2026-10-28
+
+- Houd CV/vloerverwarming in verwarmlogica wanneer de kamer boven het verlaagde doel zit; stuur het setpoint zonder vorstmodus en accepteer ontbrekende oude doelterugmelding bij een handmatige wijziging.
+
 ## 2.0.9 - 2026-10-28
 
 - Stuur bij een handmatige doelwijziging van een kamer zonder gekoppelde warmtebron alleen de climate-thermostaat aan, ook als de huidige doelwaarde niet wordt gerapporteerd.
+- Respecteer het afgifteprofiel: CV/vloerverwarming schakelen niet naar koelen; een lager handmatig doel wordt wel naar de thermostaat gestuurd.
 
 ## 2.0.8 - 2026-10-28
 

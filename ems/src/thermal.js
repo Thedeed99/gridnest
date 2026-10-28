@@ -144,7 +144,8 @@ export function planThermal({ thermal, settings, entities, mappings, temperature
       ? Number(temperatureEntity.state)
       : isFresh(temperatureEntity, now, settings.maxAgeSeconds) && temperatureEntity.domain === 'climate' && Number.isFinite(temperatureEntity.currentTemperature) ? temperatureEntity.currentTemperature : null;
     if (!Number.isFinite(currentC)) { plans.push(blocked('Automatische verwarming/koeling vereist een recente kamertemperatuur.')); continue; }
-    const desiredMode = currentC < baseTarget - 0.5 ? 'heat' : currentC > baseTarget + 0.5 ? 'cool' : ['heat', 'cool'].includes(entity.state) ? entity.state : 'off';
+    let desiredMode = currentC < baseTarget - 0.5 ? 'heat' : currentC > baseTarget + 0.5 ? 'cool' : ['heat', 'cool'].includes(entity.state) ? entity.state : 'off';
+    if (desiredMode === 'cool' && source.profile !== 'airco' && entity?.hvacModes?.includes('heat')) desiredMode = 'heat';
     if (desiredMode === 'off') { plans.push(planMode('off', `${room.name}: doel bereikt; klimaatregeling uitschakelen.`, `${room.name}: doel bereikt; klimaatregeling blijft uit.`)); continue; }
     if (!entity?.hvacModes?.includes(desiredMode)) {
       if (entity?.hvacModes?.includes('off')) plans.push(planMode('off', `${room.name}: bron ondersteunt ${desiredMode === 'cool' ? 'koelen' : 'verwarmen'} niet; uitschakelen.`, `${room.name}: bron ondersteunt ${desiredMode === 'cool' ? 'koelen' : 'verwarmen'} niet en staat uit.`));
@@ -161,7 +162,7 @@ export function planThermal({ thermal, settings, entities, mappings, temperature
     if (source.solar?.enabled && !solarOwner && (solar.active || solar.next.candidate === true)) solarOwner = source.id;
     if (solar.active && Number.isFinite(entity.targetStepC) && entity.targetStepC > 0 && Number.isFinite(entity.maxTempC)) solar.targetC = Math.max(room.targetC, Math.floor(Math.min(solar.targetC, entity.maxTempC, 26) / entity.targetStepC) * entity.targetStepC);
     definition.action.value = definition.action.otherwise = solar.targetC;
-    const decision = planRules({ settings: { ...settings, rules: [definition] }, entities, mappings, temperatureUnit, now })[0];
+    const decision = planRules({ settings: { ...settings, rules: [definition] }, entities, mappings, temperatureUnit, now, allowMissingObserved: manualSourceAction })[0];
     plans.push({ ...decision, definition, sourceId: source.id, origin: 'thermal', roomName: room.name, solarNext: solar.next, targetC: solar.targetC,
       reason: decision.status === 'blocked' ? decision.reason : `${room.name}: doel ${solar.targetC} graden. ${solar.reason}` });
     const planModeAlongside = manualSourceAction && decision.status === 'planned' && entity.state !== desiredMode;
