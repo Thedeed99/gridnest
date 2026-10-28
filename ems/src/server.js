@@ -287,7 +287,7 @@ export function createApp({ store, entitiesProvider, demo = false, supervisor = 
     }
     if (thermal.mode === 'active' && (demo || !supervisor || !runner?.status().activeAllowed || (store.get().thermal.mode !== 'active' && request.get('X-Gridnest-Confirm-Control') !== 'true'))) return response.status(403).json({ error: 'Actieve Warmte vereist appvrijgave en expliciete bevestiging.' });
     await store.update({ thermal });
-    await runner?.tick({ manualAction: request.get('X-Gridnest-Manual-Action') === 'true' });
+    await runner?.tick({ manualAction: request.get('X-Gridnest-Manual-Action') === 'true', manualRoomId: request.get('X-Gridnest-Manual-Room-Id') || null });
     response.json({ thermal, controlStatus: runner?.status() });
   });
   app.post('/api/thermal/pause', async (_request, response) => {

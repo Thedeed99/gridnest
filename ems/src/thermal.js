@@ -96,12 +96,13 @@ export function thermalReadings(thermal, entities, preferences = {}) {
   return { sources, rooms };
 }
 
-export function planThermal({ thermal, settings, entities, mappings, temperatureUnit, preferences = {}, now = Date.now(), solarMemory = new Map(), manualAction = false }) {
+export function planThermal({ thermal, settings, entities, mappings, temperatureUnit, preferences = {}, now = Date.now(), solarMemory = new Map(), manualAction = false, manualRoomId = null }) {
   const plans = [];
   const sources = thermal.sources.filter(source => source.controlEnabled).sort((first, second) => first.priority - second.priority);
   let solarOwner = sources.find(source => source.solar?.enabled && solarMemory.get(source.id)?.active)?.id;
   for (const source of sources) {
     const room = thermal.rooms.find(room => room.id === source.controlRoomId && room.sourceIds.includes(source.id));
+    const manualSourceAction = manualAction && room?.id === manualRoomId;
     const entity = entities.find(entity => entity.id === source.entityId);
     const definition = { id: `thermal:${source.id}:temperature`, name: source.name, priority: source.priority ?? 50,
       enabled: true, confirmed: source.confirmed, conditions: [],
@@ -150,7 +151,7 @@ export function planThermal({ thermal, settings, entities, mappings, temperature
       else plans.push(blocked(`Deze bron ondersteunt ${desiredMode === 'cool' ? 'koelen' : 'verwarmen'} niet en kan niet veilig worden uitgeschakeld.`));
       continue;
     }
-    if (entity.state !== desiredMode && entity.state !== 'off' && !manualAction) {
+    if (entity.state !== desiredMode && entity.state !== 'off' && !manualSourceAction) {
       plans.push(planMode(desiredMode, `${room.name}: eerst naar ${desiredMode === 'cool' ? 'koel' : 'verwarm'}modus schakelen.`, `${room.name}: gewenste klimaatmodus is actief.`));
       continue;
     }
@@ -163,11 +164,22 @@ export function planThermal({ thermal, settings, entities, mappings, temperature
     const decision = planRules({ settings: { ...settings, rules: [definition] }, entities, mappings, temperatureUnit, now })[0];
     plans.push({ ...decision, definition, sourceId: source.id, origin: 'thermal', roomName: room.name, solarNext: solar.next, targetC: solar.targetC,
       reason: decision.status === 'blocked' ? decision.reason : `${room.name}: doel ${solar.targetC} graden. ${solar.reason}` });
-    const planModeAlongside = manualAction && decision.status === 'planned' && entity.state !== desiredMode;
+    const planModeAlongside = manualSourceAction && decision.status === 'planned' && entity.state !== desiredMode;
     if (decision.status !== 'stable' && !planModeAlongside) continue;
     const modePlan = planMode(desiredMode, `Doel bevestigd; ${desiredMode === 'cool' ? 'koelmodus' : 'verwarmmodus'} inschakelen.`, 'De eigen thermostaat regelt op het ingestelde kamerdoel.');
     plans.push(modePlan);
     if (modePlan.status === 'stable' && source.fanMode) plans.push(planFanMode());
+  }
+  if (manualAction && manualRoomId) {
+    const room = thermal.rooms.find(item => item.id === manualRoomId && item.sourceIds.length === 0);
+    const entity = entities.find(item => item.id === room?.temperatureEntity);
+    if (room && entity?.domain === 'climate') {
+      const manualDefinition = { id: `thermal:room:${room.id}:manual-target`, name: room.name, priority: 50, enabled: true, confirmed: true, conditions: [],
+        action: { type: 'climate_temperature', entityId: entity.id, value: room.targetC, otherwise: room.targetC } };
+      const decision = planRules({ settings: { ...settings, rules: [manualDefinition] }, entities, mappings, temperatureUnit, now, allowMissingObserved: true })[0];
+      plans.push({ ...decision, definition: manualDefinition, sourceId: null, origin: 'thermal', roomName: room.name, manualRoomTarget: true,
+        reason: decision.status === 'blocked' ? decision.reason : decision.command ? `${room.name}: handmatig thermostaatdoel ${room.targetC} °C instellen.` : `${room.name}: thermostaatdoel staat al op ${room.targetC} °C.` });
+    }
   }
   return plans;
 }

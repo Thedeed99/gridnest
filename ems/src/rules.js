@@ -86,7 +86,7 @@ export function validateRules(input, entities) {
   return settings;
 }
 
-export function planRules({ settings, entities, mappings, temperatureUnit, now = Date.now(), ruleMemory = new Map() }) {
+export function planRules({ settings, entities, mappings, temperatureUnit, now = Date.now(), ruleMemory = new Map(), allowMissingObserved = false }) {
   return [...settings.rules].sort((first, second) => (first.priority ?? 50) - (second.priority ?? 50)).map(rule => {
     const result = { id: rule.id, name: rule.name, priority: rule.priority ?? 50, status: 'blocked', reason: '', command: null };
     const blocked = reason => ({ ...result, reason });
@@ -187,7 +187,7 @@ export function planRules({ settings, entities, mappings, temperatureUnit, now =
       if (Math.abs(rounded - value) > 0.000001) return blocked('Actiewaarde past niet bij de stapgrootte van het apparaat.');
       observed = Number(entity.state); service = 'number.set_value';
     }
-    if (observed === null || observed === undefined || typeof observed === 'number' && !Number.isFinite(observed)) return blocked('Huidige bedieningswaarde ontbreekt.');
+    if (!allowMissingObserved && (observed === null || observed === undefined || typeof observed === 'number' && !Number.isFinite(observed))) return blocked('Huidige bedieningswaarde ontbreekt.');
     const equal = typeof value === 'number' ? Math.abs(value - observed) < 0.001 : value === observed;
     const command = equal ? null : {
       entityId: entity.id,

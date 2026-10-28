@@ -1094,7 +1094,7 @@ function roomCard(room, config, live, compact = false) {
       try {
         const result = await api('thermal', {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json', 'X-Gridnest-Confirm-Control': 'true', 'X-Gridnest-Manual-Action': 'true' },
+          headers: { 'Content-Type': 'application/json', 'X-Gridnest-Confirm-Control': 'true', 'X-Gridnest-Manual-Action': 'true', 'X-Gridnest-Manual-Room-Id': room.id },
           body: JSON.stringify(nextConfig)
         });
         reportRoomTarget(room.id, result);
@@ -1132,7 +1132,7 @@ function roomCard(room, config, live, compact = false) {
       if (!targetRoom || !Number.isFinite(current)) return;
       targetRoom.targetC = current;
       try {
-        await saveThermal(nextConfig, true, true);
+        await saveThermal(nextConfig, true, true, room.id);
         notify(`Kamerdoel ${room.name} overgenomen van thermostaat (${number(current)} °C).`);
       } catch (err) { notify(err.message, true); }
       });
@@ -1238,7 +1238,7 @@ function roomCard(room, config, live, compact = false) {
         if (!targetSource) return;
         targetSource.fanMode = fanMode;
         try {
-          const result = await saveThermal(next, false, true);
+          const result = await saveThermal(next, false, true, source.controlRoomId);
           const decision = result.controlStatus?.decisions?.find(item => item.id === `thermal:${source.id}:fan`);
           if (decision?.status === 'blocked') notify(decision.reason, true);
           else if (result.thermal.mode !== 'active') notify(fanMode ? `Ventilatorstand ${fanMode} opgeslagen voor Proefmodus.` : 'De thermostaat bepaalt de ventilatorstand weer.');
@@ -1378,6 +1378,12 @@ function reportRoomTarget(roomId, result) {
   const room = config.rooms.find(item => item.id === roomId);
   if (room?.heatingEnabled === false) { notify(`Kamerdoel opgeslagen; verwarming voor ${room.name} staat uit.`); return; }
   if (config.mode !== 'active') { notify(`Kamerdoel opgeslagen; Warmte staat op ${{ off: 'Uit', preview: 'Proefmodus' }[config.mode] ?? config.mode} en stuurt niet.`); return; }
+  const manualTarget = result.controlStatus?.decisions?.find(decision => decision.id === `thermal:room:${roomId}:manual-target`);
+  if (manualTarget) {
+    if (['blocked', 'paused', 'waiting'].includes(manualTarget.status)) { notify(`Kamerdoel opgeslagen; ${manualTarget.reason}`, true); return; }
+    if (manualTarget.status === 'sent') { notify('Doeltemperatuur naar de thermostaat verstuurd; terugmelding volgt.'); return; }
+    if (manualTarget.status === 'stable') { notify('Thermostaatdoel bevestigd.'); return; }
+  }
   const sources = config.sources.filter(source => source.controlRoomId === roomId && source.controlEnabled);
   const decisions = (result.controlStatus?.decisions ?? []).filter(decision => sources.some(source => source.id === decision.sourceId));
   const blocked = decisions.find(decision => ['blocked', 'paused', 'waiting'].includes(decision.status));
@@ -1387,8 +1393,8 @@ function reportRoomTarget(roomId, result) {
   notify('Kamerdoel opgeslagen; kies een vrijgegeven warmtebron met deze kamer als regelkamer.', true);
 }
 
-async function saveThermal(config, confirmActive = false, manualAction = false) {
-  const result = await api('thermal', { method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-Gridnest-Confirm-Control': String(confirmActive), 'X-Gridnest-Manual-Action': String(manualAction) }, body: JSON.stringify(config) });
+async function saveThermal(config, confirmActive = false, manualAction = false, manualRoomId = null) {
+  const result = await api('thermal', { method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-Gridnest-Confirm-Control': String(confirmActive), 'X-Gridnest-Manual-Action': String(manualAction), 'X-Gridnest-Manual-Room-Id': manualRoomId ?? '' }, body: JSON.stringify(config) });
   data.thermal = result.thermal;
   if (result.controlStatus) data.controlStatus = result.controlStatus;
   await refresh();
@@ -1649,7 +1655,7 @@ function editThermal(kind, id = null, floor = '') {
       next[key] = id ? next[key].map(existing => existing.id === id ? item : existing) : [...next[key], item];
       if (isRoom) next.sources = next.sources.map(source => source.controlRoomId === item.id && !item.sourceIds.includes(source.id) ? { ...source, controlRoomId: null, controlEnabled: false, confirmed: false } : source);
       const targetOnly = isRoom && original && onlyRoomTargetChanged(original, item);
-      const result = await saveThermal(next, targetOnly && next.mode === 'active', true);
+      const result = await saveThermal(next, targetOnly && next.mode === 'active', true, targetOnly ? item.id : null);
       dialog.close();
       if (targetOnly) reportRoomTarget(item.id, result);
       else notify(isRoom ? 'Kamer opgeslagen.' : 'Warmtebron opgeslagen.');

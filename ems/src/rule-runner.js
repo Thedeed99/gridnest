@@ -10,7 +10,7 @@ export function createRuleRunner({ store, provider, unitProvider, execute, activ
   let lastMode;
   let lastThermalMode;
   let status = { mode: 'off', activeAllowed, updatedAt: null, decisions: [] };
-  async function run({ manualAction = false } = {}) {
+  async function run({ manualAction = false, manualRoomId = null } = {}) {
     const snapshot = store.get();
     const settings = snapshot.control;
     const thermal = snapshot.thermal ?? { mode: 'off', sources: [], rooms: [] };
@@ -23,13 +23,16 @@ export function createRuleRunner({ store, provider, unitProvider, execute, activ
       const connection = await provider();
       if (!connection.connected && !demo) throw new Error('offline');
       const temperatureUnit = thermal.mode !== 'off' || settings.rules.some(rule => rule.enabled && rule.action.type === 'climate_temperature') ? await unitProvider() : null;
-      const collect = (entities, time, manual = false) => {
-        const power = settings.mode === 'off' ? [] : planRules({ settings, entities, mappings: snapshot.mappings, temperatureUnit, now: time, ruleMemory }).map(decision => ({ ...decision, origin: 'power', definition: settings.rules.find(rule => rule.id === decision.id) }));
-        const heat = thermal.mode === 'off' ? [] : planThermal({ thermal, settings, entities, mappings: snapshot.mappings, preferences: snapshot.preferences, temperatureUnit, now: time, solarMemory, manualAction: manual });
+      const collect = (entities, time, manual = false, roomId = null) => {
+        const manualRoomAction = manual && Boolean(roomId);
+        const power = manualRoomAction || settings.mode === 'off' ? [] : planRules({ settings, entities, mappings: snapshot.mappings, temperatureUnit, now: time, ruleMemory }).map(decision => ({ ...decision, origin: 'power', definition: settings.rules.find(rule => rule.id === decision.id) }));
+        const plannedHeat = thermal.mode === 'off' ? [] : planThermal({ thermal, settings, entities, mappings: snapshot.mappings, preferences: snapshot.preferences, temperatureUnit, now: time, solarMemory, manualAction: manual, manualRoomId: roomId });
+        const roomSourceIds = new Set(thermal.sources.filter(source => source.controlRoomId === roomId).map(source => source.id));
+        const heat = manualRoomAction ? plannedHeat.filter(decision => roomSourceIds.has(decision.sourceId) || decision.id === `thermal:room:${roomId}:manual-target`) : plannedHeat;
         const conflicts = new Set(power.filter(decision => decision.definition.enabled && heat.some(item => item.definition.action.entityId === decision.definition.action.entityId)).map(decision => decision.definition.action.entityId));
         return [...power, ...heat].map(decision => conflicts.has(decision.definition.action.entityId) ? { ...decision, command: null, status: 'blocked', reason: 'Dubbele thermostaatbediening in Warmte en Stroom. Schakel de oude stroomregel uit.' } : decision).sort((first, second) => first.priority - second.priority);
       };
-      const decisions = collect(connection.entities, now, manualAction);
+      const decisions = collect(connection.entities, now, manualAction, manualRoomId);
       for (const decision of decisions) if (decision.solarNext) solarMemory.set(decision.sourceId, decision.solarNext);
       status.decisions = decisions;
       const sentEntities = new Set();
@@ -37,6 +40,8 @@ export function createRuleRunner({ store, provider, unitProvider, execute, activ
       for (const decision of decisions) {
         const rule = decision.definition;
         const heating = decision.origin === 'thermal';
+        const manualThermalAction = manualAction && heating && manualRoomId && (decision.id === `thermal:room:${manualRoomId}:manual-target`
+          || decision.sourceId && thermal.sources.some(source => source.id === decision.sourceId && source.controlRoomId === manualRoomId));
         const signature = heating ? JSON.stringify({ source: thermal.sources.find(source => source.id === decision.sourceId), room: thermal.rooms.find(room => room.id === thermal.sources.find(source => source.id === decision.sourceId)?.controlRoomId) }) : JSON.stringify(rule);
         const previous = memory.get(rule.id)?.signature === signature ? memory.get(rule.id) : { signature };
         memory.set(rule.id, previous);
@@ -63,14 +68,14 @@ export function createRuleRunner({ store, provider, unitProvider, execute, activ
         const switching = decision.command.service.startsWith('switch.') || decision.command.service === 'climate.set_hvac_mode';
         const changed = Date.parse(actuator?.changedAt);
         const protectiveStop = rule.action.type === 'battery_power' && decision.command.value === 0;
-        if (!(manualAction && heating) && !protectiveStop && ((previous.sentAt && now - previous.sentAt < settings.minIntervalSeconds * 1000) || switching && (!Number.isFinite(changed) || now - changed < settings.minIntervalSeconds * 1000))) {
+        if (!manualThermalAction && !protectiveStop && ((previous.sentAt && now - previous.sentAt < settings.minIntervalSeconds * 1000) || switching && (!Number.isFinite(changed) || now - changed < settings.minIntervalSeconds * 1000))) {
           decision.command = null; decision.status = 'waiting'; decision.reason = 'Minimale tijd tussen opdrachten nog niet verstreken.'; continue;
         }
-        if (sent >= 4 || sentEntities.has(actuator.id) && !(manualAction && heating)) { decision.command = null; decision.status = 'waiting'; decision.reason = 'Opdracht volgt in een volgende regelcyclus.'; continue; }
+        if (sent >= 4 || sentEntities.has(actuator.id) && !manualThermalAction) { decision.command = null; decision.status = 'waiting'; decision.reason = 'Opdracht volgt in een volgende regelcyclus.'; continue; }
         if (JSON.stringify(store.get()) !== JSON.stringify(snapshot)) break;
         const freshConnection = await provider();
         if (!freshConnection.connected) throw new Error('offline');
-        const verified = collect(freshConnection.entities, clock(), manualAction).find(item => item.id === rule.id);
+        const verified = collect(freshConnection.entities, clock(), manualAction, manualRoomId).find(item => item.id === rule.id);
         if (!verified?.command || JSON.stringify(verified.command) !== JSON.stringify(decision.command) || !freshConnection.entities.find(item => item.id === actuator.id)?.available || JSON.stringify(store.get()) !== JSON.stringify(snapshot)) {
           decision.command = null; decision.status = 'waiting'; decision.reason = 'Meetwaarden of instellingen gewijzigd; opnieuw beoordelen.'; continue;
         }
