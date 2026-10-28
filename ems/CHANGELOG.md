@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.9 - 2026-10-28
+
+- Stuur bij een handmatige doelwijziging van een kamer zonder gekoppelde warmtebron alleen de climate-thermostaat aan, ook als de huidige doelwaarde niet wordt gerapporteerd.
+
 ## 2.0.8 - 2026-10-28
 
 - Voer bij een handmatige kamerdoelwijziging de temperatuur- en klimaatmodusopdracht in dezelfde runner-cyclus uit; automatische regeling blijft op bevestiging wachten.

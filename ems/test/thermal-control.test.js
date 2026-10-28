@@ -88,7 +88,7 @@ test('handmatig kamer uit omzeilt minimale opdrachttijd na een moduswijziging', 
   input.thermal.rooms[0].heatingEnabled = false;
   time += 30000;
   assert.equal((await runner.tick()).decisions[0].status, 'waiting');
-  assert.equal((await runner.tick({ manualAction: true })).decisions[0].status, 'sent');
+  assert.equal((await runner.tick({ manualAction: true, manualRoomId: 'living' })).decisions[0].status, 'sent');
   assert.equal(sent[1].value, 'off');
 });
 
@@ -105,7 +105,7 @@ test('handmatig doel schakelt een uitgeschakelde thermostaat direct in dezelfde 
     provider: async () => ({ connected: true, entities: input.entities.map(entity => ({ ...entity, reportedAt: new Date(now).toISOString(), changedAt: new Date(now).toISOString() })) }),
     unitProvider: async () => '°C', execute: async command => sent.push(command), activeAllowed: true, clock: () => now });
 
-  const result = await runner.tick({ manualAction: true });
+  const result = await runner.tick({ manualAction: true, manualRoomId: 'living' });
 
   assert.deepEqual(sent, [
     { entityId: 'climate.cv', service: 'climate.set_temperature', value: 21 },
@@ -113,6 +113,43 @@ test('handmatig doel schakelt een uitgeschakelde thermostaat direct in dezelfde 
   ]);
   assert.equal(result.decisions.find(item => item.id === 'thermal:cv:temperature').status, 'sent');
   assert.equal(result.decisions.find(item => item.id === 'thermal:cv:mode').status, 'sent');
+});
+
+test('handmatig kamerdoel zonder gekoppelde warmtebron stuurt alleen de thermostaattemperatuur', () => {
+  const input = fixture();
+  input.thermal.sources = [];
+  input.thermal.rooms[0].sourceIds = [];
+  input.thermal.rooms[0].temperatureEntity = 'climate.cv';
+  input.thermal.rooms[0].targetC = 19;
+  input.entities[1].targetTemperature = null;
+  input.entities[1].targetTemperature = 20;
+  const plans = planThermal({ ...input, manualAction: true, manualRoomId: 'living' });
+
+  assert.equal(plans.length, 1);
+  assert.equal(plans[0].id, 'thermal:room:living:manual-target');
+  assert.deepEqual(plans[0].command, { entityId: 'climate.cv', service: 'climate.set_temperature', value: 19 });
+});
+
+test('runner voert een handmatig doel zonder bron alleen naar die climate-entiteit uit', async () => {
+  const input = fixture();
+  input.thermal.mode = 'active';
+  input.thermal.sources = [];
+  input.thermal.rooms[0].sourceIds = [];
+  input.thermal.rooms[0].temperatureEntity = 'climate.cv';
+  input.thermal.rooms[0].targetC = 19;
+  input.entities[1].targetTemperature = null;
+  input.thermal.sources.push({ id: 'other-source', name: 'Andere CV', entityId: 'climate.other', profile: 'underfloor', controlEnabled: true, confirmed: true, controlRoomId: 'other-room', priority: 2, fanMode: null, solar: { enabled: false, powerEntity: null, boostC: 1, startW: 1500, stopW: 500, delayMinutes: 5, fromHour: 9, untilHour: 17 } });
+  input.thermal.rooms.push({ id: 'other-room', name: 'Andere kamer', floor: '1e verdieping', temperatureEntity: 'sensor.other_temperature', presenceEntity: null, targetC: 21, presenceControl: false, heatingEnabled: true, awayC: null, sourceIds: ['other-source'] });
+  input.entities.push(
+    { id: 'sensor.other_temperature', domain: 'sensor', unit: '°C', available: true, state: '18', reportedAt: new Date(now).toISOString() },
+    { id: 'climate.other', domain: 'climate', available: true, state: 'off', targetTemperature: 19, hvacModes: ['heat', 'off'], supportedFeatures: 1, minTempC: 7, maxTempC: 30, targetStepC: 0.5, reportedAt: new Date(now).toISOString() }
+  );
+  const snapshot = { control: input.settings, thermal: input.thermal, mappings: input.mappings, preferences: {} };
+  const sent = [];
+  const runner = createRuleRunner({ store: { get: () => structuredClone(snapshot) }, provider: async () => ({ connected: true, entities: input.entities }),
+    unitProvider: async () => '°C', execute: async command => sent.push(command), activeAllowed: true, clock: () => now });
+  await runner.tick({ manualAction: true, manualRoomId: 'living' });
+  assert.deepEqual(sent, [{ entityId: 'climate.cv', service: 'climate.set_temperature', value: 19 }]);
 });
 
 test('automatische stand koelt met de airco en zet een CV zonder koelstand uit', () => {
