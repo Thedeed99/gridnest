@@ -5,24 +5,53 @@ export function createRuleRunner({ store, provider, unitProvider, execute, activ
   const memory = new Map();
   const ruleMemory = new Map();
   const solarMemory = new Map();
+  const targetMemory = new Map();
   let timer;
   let running;
   let lastMode;
   let lastThermalMode;
   let status = { mode: 'off', activeAllowed, updatedAt: null, decisions: [] };
   async function run({ manualAction = false, manualRoomId = null } = {}) {
-    const snapshot = store.get();
+    let snapshot = store.get();
     const settings = snapshot.control;
-    const thermal = snapshot.thermal ?? { mode: 'off', sources: [], rooms: [] };
+    let thermal = snapshot.thermal ?? { mode: 'off', sources: [], rooms: [] };
     const now = clock();
     if (settings.mode !== lastMode) { for (const key of memory.keys()) if (!key.startsWith('thermal:')) memory.delete(key); ruleMemory.clear(); lastMode = settings.mode; }
-    if (thermal.mode !== lastThermalMode) { for (const key of memory.keys()) if (key.startsWith('thermal:')) memory.delete(key); solarMemory.clear(); lastThermalMode = thermal.mode; }
+    if (thermal.mode !== lastThermalMode) { for (const key of memory.keys()) if (key.startsWith('thermal:')) memory.delete(key); solarMemory.clear(); targetMemory.clear(); lastThermalMode = thermal.mode; }
     status = { mode: settings.mode, thermalMode: thermal.mode, activeAllowed, updatedAt: new Date(now).toISOString(), decisions: [] };
     if (settings.mode === 'off' && thermal.mode === 'off') return status;
     try {
       const connection = await provider();
       if (!connection.connected && !demo) throw new Error('offline');
       const temperatureUnit = thermal.mode !== 'off' || settings.rules.some(rule => rule.enabled && rule.action.type === 'climate_temperature') ? await unitProvider() : null;
+      if (thermal.mode === 'active' && activeAllowed && !demo && temperatureUnit === '\u00b0C') {
+        const targets = new Map();
+        for (const source of thermal.sources.filter(source => source.controlEnabled && source.confirmed).sort((first, second) => first.priority - second.priority)) {
+          const room = thermal.rooms.find(room => room.id === source.controlRoomId && room.sourceIds.includes(source.id));
+          const entity = connection.entities.find(entity => entity.id === source.entityId);
+          if (!room || !entity?.available || entity.domain !== 'climate' || !Number.isFinite(entity.targetTemperature)) continue;
+          const signature = JSON.stringify({ source, room });
+          const previous = targetMemory.get(source.id);
+          const pending = memory.get(`thermal:${source.id}:temperature`)?.pending;
+          const targetC = entity.targetTemperature;
+          const external = previous?.signature === signature && Math.abs(previous.targetC - targetC) > 0.001
+            && (!pending || Math.abs(pending.value - targetC) > 0.001);
+          const conflict = settings.mode !== 'off' && settings.rules.some(rule => rule.enabled && rule.action.entityId === entity.id);
+          if (external && !conflict && !(manualAction && manualRoomId === room.id) && targetC >= 12 && targetC <= 26 && !targets.has(room.id)) targets.set(room.id, targetC);
+          targetMemory.set(source.id, { signature, targetC });
+        }
+        if (targets.size) {
+          if (JSON.stringify(store.get()) !== JSON.stringify(snapshot)) return status;
+          thermal = { ...thermal, rooms: thermal.rooms.map(room => targets.has(room.id) ? { ...room, targetC: targets.get(room.id) } : room) };
+          snapshot = await store.update({ thermal });
+          thermal = snapshot.thermal;
+          for (const source of thermal.sources) {
+            const room = thermal.rooms.find(room => room.id === source.controlRoomId && room.sourceIds.includes(source.id));
+            const previous = targetMemory.get(source.id);
+            if (previous && targets.has(room?.id)) previous.signature = JSON.stringify({ source, room });
+          }
+        }
+      }
       const collect = (entities, time, manual = false, roomId = null) => {
         const manualRoomAction = manual && Boolean(roomId);
         const power = manualRoomAction || settings.mode === 'off' ? [] : planRules({ settings, entities, mappings: snapshot.mappings, temperatureUnit, now: time, ruleMemory }).map(decision => ({ ...decision, origin: 'power', definition: settings.rules.find(rule => rule.id === decision.id) }));

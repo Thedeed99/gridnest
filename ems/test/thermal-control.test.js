@@ -405,6 +405,84 @@ test('handmatige moduswijziging pauzeert Warmte niet', async () => {
   assert.deepEqual(sent, [{ entityId: 'climate.cv', service: 'climate.set_hvac_mode', value: 'heat' }]);
 });
 
+for (const profile of ['radiators', 'underfloor', 'airco']) {
+  test(`${profile}: externe temperatuurwijziging werkt het kamerdoel bij zonder pauze`, async () => {
+    const input = fixture();
+    input.thermal.mode = 'active';
+    input.thermal.sources[0].profile = profile;
+    input.entities[1].state = 'heat';
+    input.entities[1].targetTemperature = 21;
+    input.entities[1].hvacModes = ['off', 'heat', 'cool'];
+    input.entities[1].changedAt = new Date(now - 3600000).toISOString();
+    const snapshot = { control: { ...defaultRules, manualHoldMinutes: 60 }, thermal: input.thermal, mappings: {}, preferences: {} };
+    const sent = [];
+    let time = now;
+    const runner = createRuleRunner({ store: { get: () => structuredClone(snapshot), update: async patch => { Object.assign(snapshot, structuredClone(patch)); return structuredClone(snapshot); } },
+      provider: async () => ({ connected: true, entities: input.entities.map(entity => ({ ...entity, reportedAt: new Date(time).toISOString() })) }),
+      unitProvider: async () => '°C', execute: async command => sent.push(command), activeAllowed: true, clock: () => time });
+    await runner.tick();
+    input.entities[1].targetTemperature = 20;
+    time += 30000;
+    const result = await runner.tick();
+    assert.deepEqual(sent, []);
+    assert.equal(snapshot.thermal.rooms[0].targetC, 20);
+    assert.equal(snapshot.thermal.mode, 'active');
+    assert.ok(result.decisions.every(decision => decision.status === 'stable'));
+    input.entities[1].targetTemperature = 22;
+    time += 30000;
+    await runner.tick();
+    assert.deepEqual(sent, []);
+    assert.equal(snapshot.thermal.rooms[0].targetC, 22);
+    time += 3600000;
+    await runner.tick();
+    assert.deepEqual(sent, []);
+    assert.equal(snapshot.thermal.rooms[0].targetC, 22);
+  });
+}
+
+test('externe doelwijziging tijdens wachten op een eigen opdracht krijgt voorrang', async () => {
+  const input = fixture();
+  input.thermal.mode = 'active';
+  input.entities[1].state = 'heat';
+  const snapshot = { control: defaultRules, thermal: input.thermal, mappings: {}, preferences: {} };
+  const sent = [];
+  let time = now;
+  const runner = createRuleRunner({ store: { get: () => structuredClone(snapshot), update: async patch => { Object.assign(snapshot, structuredClone(patch)); return structuredClone(snapshot); } },
+    provider: async () => ({ connected: true, entities: input.entities.map(entity => ({ ...entity, reportedAt: new Date(time).toISOString() })) }),
+    unitProvider: async () => '\u00b0C', execute: async command => sent.push(command), activeAllowed: true, clock: () => time });
+  await runner.tick();
+  input.entities[1].targetTemperature = 23;
+  time += 30000;
+  const result = await runner.tick();
+  assert.equal(snapshot.thermal.rooms[0].targetC, 23);
+  assert.equal(result.decisions[0].status, 'stable');
+  assert.equal(sent.length, 1);
+});
+
+test('terugmelding van een eigen zonneboost wijzigt het opgeslagen kamerdoel niet', async () => {
+  const input = sunnyFixture();
+  input.thermal.mode = 'active';
+  input.entities[1].state = 'heat';
+  input.entities[1].targetTemperature = 21;
+  const snapshot = { control: defaultRules, thermal: input.thermal, mappings: input.mappings, preferences: {} };
+  const sent = [];
+  let time = now;
+  let updates = 0;
+  const runner = createRuleRunner({ store: { get: () => structuredClone(snapshot), update: async patch => { updates++; Object.assign(snapshot, structuredClone(patch)); return structuredClone(snapshot); } },
+    provider: async () => ({ connected: true, entities: input.entities.map(entity => ({ ...entity, reportedAt: new Date(time).toISOString() })) }),
+    unitProvider: async () => '\u00b0C', execute: async command => sent.push(command), activeAllowed: true, clock: () => time });
+  await runner.tick();
+  time += 300000;
+  await runner.tick();
+  assert.equal(sent[0].value, 22);
+  input.entities[1].targetTemperature = 22;
+  time += 30000;
+  await runner.tick();
+  assert.equal(snapshot.thermal.rooms[0].targetC, 21);
+  assert.equal(updates, 0);
+  assert.equal(sent.length, 1);
+});
+
 test('alleen kamerdoel wijzigen behoudt regeling en stuurt het nieuwe climate-doel', async () => {
   const input = fixture();
   input.thermal.mode = 'active';

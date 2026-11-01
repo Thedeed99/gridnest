@@ -1,5 +1,9 @@
 # Changelog
 
+## Nog niet uitgebracht
+
+- Neem externe thermostaatdoelwijzigingen over in het gekoppelde kamerdoel voor actieve CV-, vloerverwarming- en aircoregeling, zonder pauze of terugzetten naar de oude temperatuur. Eigen commandoterugmeldingen, waaronder zonneboost, veranderen het kamerdoel niet.
+
 ## 2.0.10 - 2026-10-28
 
 - Houd CV/vloerverwarming in verwarmlogica wanneer de kamer boven het verlaagde doel zit; stuur het setpoint zonder vorstmodus en accepteer ontbrekende oude doelterugmelding bij een handmatige wijziging.

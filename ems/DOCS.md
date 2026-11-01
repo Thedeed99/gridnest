@@ -121,6 +121,8 @@ Warmte kan nu zelf thermostaatdoelen en verwarmmodus aansturen. Kies bij een bro
 
 Warmte heeft een eigen stand Uit, Proefmodus of Actief, onafhankelijk van Stroom. Gebruik eerst proefmodus; een nieuwe activering vereist dezelfde appvrijgave en expliciete bevestiging als Stroom. De gekozen stand blijft behouden bij opslaan en herstarten. De pauzeknop in Warmte stopt nieuwe warmteopdrachten, niet de stroomregels. Dubbele thermostaatbediening vanuit Warmte en een bestaande stroomregel wordt geblokkeerd.
 
+Bij actieve, vrijgegeven bronregeling neemt Gridnest een gewijzigde doeltemperatuur op de thermostaat of in Home Assistant bij de volgende regelcyclus over als opgeslagen doel van de gekoppelde regelkamer. Dit geldt voor CV, vloerverwarming en airco, binnen het kamerdoelbereik van 12 tot 26 graden. Er volgt geen pauze: de regeling gaat door met het nieuwe kamerdoel, inclusief eventueel ingestelde aanwezigheid en zonneboost. Terugmeldingen van Gridnests eigen temperatuurcommando's wijzigen het kamerdoel niet. Een expliciete kamerdoelwijziging in Gridnest heeft voorrang. Na activeren of een configuratiewijziging dient de eerste meting als uitgangspunt voor het herkennen van volgende externe wijzigingen.
+
 Een gedeelde centrale thermostaat maakt kamers niet onafhankelijk regelbaar: daarvoor zijn geschikte zoneregeling of radiatorregelaars nodig. Per bron is daarom een regelkamer leidend; andere kamers worden gemonitord. Meerdere ingeschakelde bronnen op dezelfde kamer krijgen hetzelfde doel, zonder automatische keuze van de goedkoopste bron. Een airco heeft alleen invloed op de ruimtes die deze fysiek kan verwarmen.
 
 ### Voorverwarmen met zonnestroom
