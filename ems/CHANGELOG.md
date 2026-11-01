@@ -1,6 +1,6 @@
 # Changelog
 
-## Nog niet uitgebracht
+## 2.0.11 - 2026-11-01
 
 - Neem externe thermostaatdoelwijzigingen over in het gekoppelde kamerdoel voor actieve CV-, vloerverwarming- en aircoregeling, zonder pauze of terugzetten naar de oude temperatuur. Eigen commandoterugmeldingen, waaronder zonneboost, veranderen het kamerdoel niet.
 
