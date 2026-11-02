@@ -1,10 +1,10 @@
-import { createIcons, Activity, Link, SlidersHorizontal, RefreshCw, HousePlug, House, Sun, Moon, Flame, Droplet, Plug, Car, Heater, BatteryCharging, Battery, Thermometer, ArrowUpRight, ArrowDownLeft, Lock, Unlock, Clock3, EllipsisVertical, Power, Save, Search, Check, Unplug, Plus, Pencil, Trash2, X, ListChecks, Pause, Play, Menu, Minus, CloudLightning, ChevronDown } from 'lucide';
+import { createIcons, Activity, Link, SlidersHorizontal, RefreshCw, HousePlug, House, Sun, Moon, Palette, Flame, Droplet, Plug, Car, Heater, BatteryCharging, Battery, Thermometer, ArrowUpRight, ArrowDownLeft, Lock, Unlock, Clock3, EllipsisVertical, Power, Save, Search, Check, Unplug, Plus, Pencil, Trash2, X, ListChecks, Pause, Play, Menu, Minus, CloudLightning, ChevronDown } from 'lucide';
 import { Chart } from 'chart.js/auto';
 import { DateTime } from 'luxon';
 import { createId } from './ids.js';
 import { climateStatus, modeLabel, onlyRoomTargetChanged } from './status.js';
 import { formatPower } from './power.js';
-import { dailyOverviewRows } from '../src/daily-recap.js';
+import { consumerDayReading, dailyOverviewRows } from '../src/daily-recap.js';
 import { isCumulativeSolarMeter } from '../src/solar-meter.js';
 import { batteryState } from './battery.js';
 
@@ -19,7 +19,7 @@ function isCompatibleEntity(role, entity) {
     (!role.deviceClasses || role.deviceClasses.includes(entity.deviceClass));
 }
 
-const icons = { Activity, Link, SlidersHorizontal, RefreshCw, HousePlug, House, Sun, Moon, Flame, Droplet, Plug, Car, Heater, BatteryCharging, Battery, Thermometer, ArrowUpRight, ArrowDownLeft, Lock, Unlock, Clock3, EllipsisVertical, Power, Save, Search, Check, Unplug, Plus, Pencil, Trash2, X, ListChecks, Pause, Play, Menu, Minus, CloudLightning, ChevronDown };
+const icons = { Activity, Link, SlidersHorizontal, RefreshCw, HousePlug, House, Sun, Moon, Palette, Flame, Droplet, Plug, Car, Heater, BatteryCharging, Battery, Thermometer, ArrowUpRight, ArrowDownLeft, Lock, Unlock, Clock3, EllipsisVertical, Power, Save, Search, Check, Unplug, Plus, Pencil, Trash2, X, ListChecks, Pause, Play, Menu, Minus, CloudLightning, ChevronDown };
 const main = document.querySelector('#main');
 let data;
 let view = 'overview';
@@ -665,6 +665,16 @@ function consumptionSplit() {
         const current = data.energy?.consumers?.find(item => item.id === consumer.id);
         return powerText(current?.powerKw ?? null);
       }));
+      const daily = element('span', 'consumer-day-energy');
+      bindLive(daily, () => {
+        const recap = dailyRecapCache?.mappingsKey === JSON.stringify(data.mappings) ? dailyRecapCache : null;
+        const reading = consumerDayReading(recap, consumer.id);
+        daily.textContent = reading ? `Vandaag ~ ${new Intl.NumberFormat('nl-NL', { maximumFractionDigits: 2 }).format(reading.energyKwh)} kWh` : 'Vandaag: n.b.';
+        daily.title = reading
+          ? `Geschat verbruik sinds middernacht (${recap.timeZone}), berekend uit vermogenshistorie.${reading.complete ? '' : ' Historie is onvolledig.'}`
+          : 'Verbruik sinds middernacht niet beschikbaar: daghistorie ontbreekt of wordt opgehaald.';
+      });
+      row.append(daily);
       if (switchId) {
         const currentActuator = () => data.entities.find(item => item.id === data.mappings.knownConsumerSwitches?.[consumer.id]);
         const executeToggle = async () => {
@@ -878,6 +888,7 @@ async function dailyHistory(reload = false) {
   if (reload || !dailyRecapCache || dailyRecapCache.mappingsKey !== mappingsKey || Date.now() - dailyRecapCache.fetchedAt > 30000) {
     const previousRows = dailyRecapCache?.mappingsKey === mappingsKey ? dailyRecapCache.overviewRows : undefined;
     dailyRecapCache = { ...await api('daily-recap'), fetchedAt: Date.now(), mappingsKey, overviewRows: previousRows };
+    updateLiveBindings();
   }
   return dailyRecapCache;
 }
@@ -3911,6 +3922,34 @@ menuBackdrop.addEventListener('click', closeMobileMenu);
 document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', closeMobileMenu));
 document.addEventListener('keydown', event => { if (event.key === 'Escape') closeMobileMenu(); });
 const themeToggle = document.querySelector('#theme-toggle');
+const themes = [
+  { id: 'light', label: 'Licht', icon: 'sun', color: '#17694d' },
+  { id: 'dark', label: 'Donker', icon: 'moon', color: '#151d19' },
+  { id: 'homify', label: 'Homify', icon: 'palette', color: '#211910' }
+];
+const themeMenu = element('div', 'theme-menu');
+themeMenu.id = 'theme-menu';
+themeMenu.setAttribute('popover', 'auto');
+themeMenu.setAttribute('role', 'group');
+themeMenu.setAttribute('aria-label', 'Kleurthema');
+themeToggle.setAttribute('popovertarget', themeMenu.id);
+themeToggle.setAttribute('aria-controls', themeMenu.id);
+themeToggle.setAttribute('aria-expanded', 'false');
+for (const theme of themes) {
+  const choice = element('button', 'theme-choice', theme.label);
+  choice.type = 'button';
+  choice.dataset.themeChoice = theme.id;
+  choice.prepend(icon(theme.icon));
+  choice.addEventListener('click', () => {
+    applyTheme(theme.id, true);
+    updateLiveBindings();
+    themeMenu.hidePopover();
+    themeToggle.focus();
+  });
+  themeMenu.append(choice);
+}
+themeMenu.addEventListener('toggle', event => themeToggle.setAttribute('aria-expanded', String(event.newState === 'open')));
+document.body.append(themeMenu);
 const powerUnitToggle = document.querySelector('#power-unit-toggle');
 function applyPowerUnit() {
   powerUnitToggle.textContent = powerUnit;
@@ -3948,25 +3987,22 @@ powerUnitToggle.addEventListener('click', () => {
   updateLiveBindings();
 });
 function applyTheme(theme, persist = false) {
-  const dark = theme === 'dark';
-  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
-  themeToggle.setAttribute('aria-label', dark ? 'Lichte modus inschakelen' : 'Donkere modus inschakelen');
-  themeToggle.title = dark ? 'Lichte modus inschakelen' : 'Donkere modus inschakelen';
-  themeToggle.replaceChildren(icon(dark ? 'sun' : 'moon'));
+  const selected = themes.find(item => item.id === theme) ?? themes[0];
+  document.documentElement.dataset.theme = selected.id;
+  themeToggle.setAttribute('aria-label', `Kleurthema: ${selected.label}`);
+  themeToggle.title = `Kleurthema: ${selected.label}`;
+  themeToggle.replaceChildren(icon(selected.icon));
+  for (const choice of themeMenu.querySelectorAll('[data-theme-choice]')) choice.setAttribute('aria-pressed', String(choice.dataset.themeChoice === selected.id));
   createIcons({ icons });
-  document.querySelector('meta[name="theme-color"]').content = dark ? '#151c19' : '#17694d';
+  document.querySelector('meta[name="theme-color"]').content = selected.color;
   updateChartTheme();
   if (persist) {
-    try { localStorage.setItem('gridnest-theme', dark ? 'dark' : 'light'); } catch {}
+    try { localStorage.setItem('gridnest-theme', selected.id); } catch {}
   }
 }
 let savedTheme;
 try { savedTheme = localStorage.getItem('gridnest-theme'); } catch {}
 applyTheme(savedTheme ?? (window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
-themeToggle.addEventListener('click', () => {
-  applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark', true);
-  updateLiveBindings();
-});
 createIcons({ icons });
 setRefreshInterval(10);
 refresh();
