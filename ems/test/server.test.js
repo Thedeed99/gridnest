@@ -385,6 +385,24 @@ test('API bewaart verwarmingsprofiel en levert advies zonder schakelcommando', a
   assert.equal(body.mode, 'read-only');
 });
 
+test('kamerwijziging blijft opslaan als een andere kamer een offline thermostaat heeft', async context => {
+  const { url, store } = await fixture(context, { entitiesProvider: async () => ({ connected: true,
+    entities: demoEntities().map(entity => entity.id === 'climate.demo_heating' ? { ...entity, available: false, state: 'unavailable', currentTemperature: null } : entity) }) });
+  const thermal = thermalConfig();
+  thermal.rooms.push({ id: 'offline', name: 'Radiator Slaapkamer', floor: '1e verdieping', temperatureEntity: 'climate.demo_heating', presenceEntity: null, targetC: 18, sourceIds: [] });
+  await store.update({ thermal });
+  thermal.rooms[0].targetC = 22;
+  const save = () => fetch(`${url}/api/thermal`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(thermal) });
+  const response = await save();
+  assert.equal(response.status, 200);
+  assert.equal(store.get().thermal.rooms[0].targetC, 22);
+  assert.equal(store.get().thermal.rooms[1].temperatureEntity, 'climate.demo_heating');
+  thermal.rooms[1].temperatureEntity = 'sensor.demo_ev_power';
+  const invalid = await save();
+  assert.equal(invalid.status, 400);
+  assert.match((await invalid.json()).error, /Radiator Slaapkamer/);
+});
+
 test('kamers en meerdere warmtebronnen blijven bewaard na herstart', async context => {
   const { url, directory } = await fixture(context);
   const response = await fetch(`${url}/api/thermal`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(thermalConfig()) });
