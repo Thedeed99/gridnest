@@ -281,6 +281,20 @@ test('kamer met climate-entiteit als temperatuursensor kan regelen en verwarmmod
   assert.equal(plans[1].command.value, 'heat'); // schakelt kachel in!
 });
 
+test('een tijdelijk onbeschikbare thermostaat blokkeert kameropslag niet maar wordt niet aangestuurd', () => {
+  const input = fixture();
+  input.thermal.rooms[0].temperatureEntity = 'climate.cv';
+  input.entities[1] = { ...input.entities[1], available: false, state: 'unavailable', currentTemperature: null };
+  assert.doesNotThrow(() => validateThermal(input.thermal, input.entities));
+  assert.equal(planThermal(input)[0].status, 'blocked');
+  assert.equal(planThermal(input)[0].command, null);
+  input.thermal.rooms[0].temperatureEntity = 'sensor.missing';
+  assert.throws(() => validateThermal(input.thermal, input.entities), /temperatuursensor/);
+  input.thermal.rooms[0].temperatureEntity = 'sensor.temperature';
+  input.entities[0].unit = 'W';
+  assert.throws(() => validateThermal(input.thermal, input.entities), /temperatuursensor/);
+});
+
 test('monitor-only en onbevestigde bronnen sturen niet', () => {
   const input = fixture(); input.thermal.sources[0].controlEnabled = false;
   assert.deepEqual(planThermal(input), []);

@@ -125,6 +125,8 @@ Waar beschikbaar wordt de werkelijke `hvac_action` getoond, bijvoorbeeld verwarm
 
 Kamers en bronnen zijn via het potlood te bewerken. Verwijderen vereist bevestiging. Bij het verwijderen van een bron worden de kamerreferenties naar die bron ook verwijderd; andere bronnen blijven gekoppeld.
 
+Een bestaande thermostaat als temperatuurbron mag tijdelijk offline zijn zonder het opslaan van kamers te blokkeren. De koppeling blijft behouden, maar automatische sturing blijft geblokkeerd zolang de benodigde apparaat- of temperatuurgegevens ontbreken. Een niet-bestaande of verkeerde temperatuurbron wordt nog steeds geweigerd; de foutmelding noemt de betreffende kamer.
+
 Warmte kan nu zelf thermostaatdoelen en verwarmmodus aansturen. Kies bij een bron een gekoppelde regelkamer, zet bronregeling aan en bevestig de thermostaatbediening. Het kamerdoel wordt dan de doeltemperatuur van die bron. Het temperatuurdoel wordt eerst geschreven; verwarmmodus volgt pas na terugmelding. De eigen thermostaat regelt vervolgens de warmteafgifte. Gridnest schakelt de netvoeding niet uit.
 
 Warmte heeft een eigen stand Uit, Proefmodus of Actief, onafhankelijk van Stroom. Gebruik eerst proefmodus; een nieuwe activering vereist dezelfde appvrijgave en expliciete bevestiging als Stroom. De gekozen stand blijft behouden bij opslaan en herstarten. De pauzeknop in Warmte stopt nieuwe warmteopdrachten, niet de stroomregels. Dubbele thermostaatbediening vanuit Warmte en een bestaande stroomregel wordt geblokkeerd.

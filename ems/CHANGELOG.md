@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.14 - 2026-11-02
+
+- Geef bewerk- en bevestigingsdialogen in het Homify-thema een ondoorzichtige achtergrond, zodat onderliggende kamerinhoud niet door het formulier schijnt.
+- Laat een bestaande maar tijdelijk offline thermostaat als temperatuurbron opgeslagen blijven zonder wijzigingen aan andere kamers te blokkeren. Aansturing vereist nog steeds bruikbare apparaatdata; foutmeldingen bij ongeldige temperatuurkoppelingen noemen de kamer.
+
 ## 2.0.13 - 2026-11-02
 
 - Maak de desktopzijbalk subtieler en inklapbaar tot een smalle iconenbalk, met tooltips en een onthouden browservoorkeur. De mobiele navigatielade behoudt alle menulabels.

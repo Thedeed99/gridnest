@@ -49,9 +49,9 @@ export function validateThermal(input, entities, mappings = {}) {
     const tempEntity = find(room.temperatureEntity);
     const validTemp = tempEntity && (
       (tempEntity.domain === 'sensor' && compatible(roles.find(role => role.id === 'temperature'), tempEntity)) ||
-      (tempEntity.domain === 'climate' && (Number.isFinite(tempEntity.currentTemperature) || tempEntity.available))
+      tempEntity.domain === 'climate'
     );
-    if (room.temperatureEntity && !validTemp) throw new Error('Een kamer vereist een bestaande temperatuursensor in graden Celsius of een climate-entiteit.');
+    if (room.temperatureEntity && !validTemp) throw new Error(`${room.name}: een kamer vereist een bestaande temperatuursensor in graden Celsius of een climate-entiteit.`);
     const presence = find(room.presenceEntity);
     if (room.presenceEntity && !(presence && (['person', 'device_tracker'].includes(presence.domain) || compatible(roles.find(role => role.id === 'presence'), presence)))) throw new Error('Een kamer vereist een bestaande aanwezigheidssensor.');
   }

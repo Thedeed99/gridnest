@@ -296,6 +296,8 @@ footer { display: flex; justify-content: space-between; gap: 12px; font-size: 10
 .empty-state { color: var(--muted); font-size: 13px; margin: 24px 0; }
 .thermal-dialog { border: 1px solid var(--line); border-radius: 6px; padding: 24px; background: var(--surface); color: var(--text); width: min(540px, calc(100% - 32px)); max-height: calc(100dvh - 40px); overflow-y: auto; box-shadow: 0 12px 60px #152b2938; }
 .thermal-dialog::backdrop { background: #13272080; }
+:root[data-theme="homify"] .thermal-dialog { background: #33281a; }
+:root[data-theme="homify"] .thermal-dialog::backdrop { background: #100c08a6; }
 .thermal-dialog > form > .section-heading { gap: 16px; }
 .thermal-dialog h2 { font-size: 18px; }
 .dialog-fields { display: grid; gap: 18px; margin: 24px 0; }
