@@ -48,6 +48,7 @@ let energyCostsRequest;
 let tariffHistoryCache;
 let tariffHistoryRequest;
 const liveBindings = new Map();
+const climateRequests = new Map();
 let solarLimitConsentEntity;
 let solarLimitPending = false;
 
@@ -1168,22 +1169,11 @@ function roomCard(room, config, live, compact = false) {
     const heatToggle = element('label', 'checkbox-field room-heat-toggle');
     const input = element('input');
     input.type = 'checkbox';
-    const hasAircoSource = controllableSources.some(source => source.profile === 'airco');
     const label = element('span', '', '');
     const updateLabel = () => {
       const currentRoom = data.thermal?.rooms.find(item => item.id === room.id);
-      const roomEnabled = currentRoom?.heatingEnabled !== false;
-      if (hasAircoSource && roomEnabled) {
-        const aircoIds = currentRoom.sourceIds.filter(id => data.thermal.sources.some(source => source.id === id && source.profile === 'airco' && source.controlEnabled));
-        input.checked = aircoIds.some(id => ['heat', 'cool'].includes(data.thermalReadings?.sources?.find(source => source.id === id)?.mode));
-      } else {
-        input.checked = roomEnabled;
-      }
-      const sourceIds = (data.thermal?.sources ?? []).filter(source => source.controlRoomId === room.id && source.controlEnabled).map(source => source.id);
-      const pending = (data.controlStatus?.decisions ?? []).some(decision => decision.origin === 'thermal' && sourceIds.includes(decision.sourceId) && ['sent', 'waiting'].includes(decision.status));
-      input.indeterminate = pending;
-      if (pending) input.checked = roomEnabled;
-      label.textContent = pending ? 'Klimaat: wacht op bevestiging' : input.checked ? 'Klimaat aan' : 'Klimaat uit';
+      input.checked = climateRequests.has(room.id) ? climateRequests.get(room.id) : currentRoom?.heatingEnabled !== false;
+      label.textContent = input.checked ? 'Klimaat aan' : 'Klimaat uit';
       input.setAttribute('aria-label', input.checked ? `Klimaatregeling voor ${room.name} uitschakelen` : `Klimaatregeling voor ${room.name} inschakelen`);
     };
     updateLabel();
@@ -1196,6 +1186,8 @@ function roomCard(room, config, live, compact = false) {
       const targetRoom = next.rooms.find(item => item.id === room.id);
       if (!targetRoom) return;
       targetRoom.heatingEnabled = heatingEnabled;
+      climateRequests.set(room.id, heatingEnabled);
+      updateLabel();
       try {
         const result = await saveThermal(next, false, true, room.id);
         const feedback = roomClimateFeedback(result, room.id, heatingEnabled);
@@ -1205,6 +1197,10 @@ function roomCard(room, config, live, compact = false) {
         input.disabled = false;
         updateLabel();
         notify(error.message, true);
+      } finally {
+        climateRequests.delete(room.id);
+        input.disabled = false;
+        updateLiveBindings();
       }
     });
     stateRow.append(heatToggle);
@@ -1393,14 +1389,14 @@ function reportRoomTarget(roomId, result) {
   const manualTarget = result.controlStatus?.decisions?.find(decision => decision.id === `thermal:room:${roomId}:manual-target`);
   if (manualTarget) {
     if (['blocked', 'paused', 'waiting'].includes(manualTarget.status)) { notify(`Kamerdoel opgeslagen; ${manualTarget.reason}`, true); return; }
-    if (manualTarget.status === 'sent') { notify('Doeltemperatuur naar de thermostaat verstuurd; terugmelding volgt.'); return; }
+    if (manualTarget.status === 'sent') { notify('Temperatuuropdracht verstuurd.'); return; }
     if (manualTarget.status === 'stable') { notify('Thermostaatdoel bevestigd.'); return; }
   }
   const sources = config.sources.filter(source => source.controlRoomId === roomId && source.controlEnabled);
   const decisions = (result.controlStatus?.decisions ?? []).filter(decision => sources.some(source => source.id === decision.sourceId));
   const blocked = decisions.find(decision => ['blocked', 'paused', 'waiting'].includes(decision.status));
   if (blocked) { notify(`Kamerdoel opgeslagen; ${blocked.reason}`, true); return; }
-  if (decisions.some(decision => decision.status === 'sent')) { notify('Doeltemperatuur naar thermostaat verstuurd; terugmelding volgt.'); return; }
+  if (decisions.some(decision => decision.status === 'sent')) { notify('Temperatuuropdracht verstuurd.'); return; }
   if (decisions.length && decisions.every(decision => decision.status === 'stable')) { notify('Doeltemperatuur bevestigd door thermostaat.'); return; }
   notify('Kamerdoel opgeslagen; kies een vrijgegeven warmtebron met deze kamer als regelkamer.', true);
 }

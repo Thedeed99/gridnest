@@ -2,10 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { climateStatus, modeLabel, roomClimateFeedback } from '../web/status.js';
 
-test('klimaatfeedback meldt verzending en bevestiging afzonderlijk en accepteert geen uit als aan', () => {
+test('klimaatfeedback meldt direct versturen zonder wachtbevestiging en behoudt fouten', () => {
   const result = { thermal: { mode: 'active', sources: [{ id: 'airco', controlRoomId: 'living', controlEnabled: true }] },
     controlStatus: { decisions: [{ origin: 'thermal', sourceId: 'airco', status: 'sent', observed: 'off', definition: { action: { type: 'climate_mode' } } }] } };
-  assert.match(roomClimateFeedback(result, 'living', true).message, /Opdracht verzonden/);
+  assert.equal(roomClimateFeedback(result, 'living', true).message, 'Inschakelen verstuurd.');
+  assert.equal(roomClimateFeedback(result, 'living', false).message, 'Uitschakelen verstuurd.');
   const mode = result.controlStatus.decisions[0];
   mode.status = 'stable';
   assert.equal(roomClimateFeedback(result, 'living', true).error, true);

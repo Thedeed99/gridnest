@@ -26,29 +26,37 @@ export function createRuleRunner({ store, provider, unitProvider, execute, activ
       const temperatureUnit = thermal.mode !== 'off' || settings.rules.some(rule => rule.enabled && rule.action.type === 'climate_temperature') ? await unitProvider() : null;
       if (thermal.mode === 'active' && activeAllowed && !demo && temperatureUnit === '\u00b0C') {
         const targets = new Map();
+        const enabledRooms = new Map();
         for (const source of thermal.sources.filter(source => source.controlEnabled && source.confirmed).sort((first, second) => first.priority - second.priority)) {
           const room = thermal.rooms.find(room => room.id === source.controlRoomId && room.sourceIds.includes(source.id));
           const entity = connection.entities.find(entity => entity.id === source.entityId);
-          if (!room || !entity?.available || entity.domain !== 'climate' || !Number.isFinite(entity.targetTemperature)) continue;
+          if (!room || !entity?.available || entity.domain !== 'climate') continue;
           const signature = JSON.stringify({ source, room });
           const previous = targetMemory.get(source.id);
           const pending = memory.get(`thermal:${source.id}:temperature`)?.pending;
           const targetC = entity.targetTemperature;
-          const external = previous?.signature === signature && Math.abs(previous.targetC - targetC) > 0.001
+          const external = previous?.signature === signature && Number.isFinite(previous.targetC) && Number.isFinite(targetC) && Math.abs(previous.targetC - targetC) > 0.001
             && (!pending || Math.abs(pending.value - targetC) > 0.001);
           const conflict = settings.mode !== 'off' && settings.rules.some(rule => rule.enabled && rule.action.entityId === entity.id);
           if (external && !conflict && !(manualAction && manualRoomId === room.id) && targetC >= 12 && targetC <= 26 && !targets.has(room.id)) targets.set(room.id, targetC);
-          targetMemory.set(source.id, { signature, targetC });
+          const pendingMode = memory.get(`thermal:${source.id}:mode`)?.pending;
+          const externalMode = previous?.signature === signature && previous.mode !== entity.state
+            && (!pendingMode || pendingMode.value !== entity.state);
+          if (externalMode && !conflict && !(manualAction && manualRoomId === room.id) && ['underfloor', 'airco'].includes(source.profile)
+            && ['off', 'heat', 'cool', 'auto', 'heat_cool'].includes(entity.state) && !enabledRooms.has(room.id)) enabledRooms.set(room.id, entity.state !== 'off');
+          targetMemory.set(source.id, { signature, targetC, mode: entity.state });
         }
-        if (targets.size) {
+        if (targets.size || enabledRooms.size) {
           if (JSON.stringify(store.get()) !== JSON.stringify(snapshot)) return status;
-          thermal = { ...thermal, rooms: thermal.rooms.map(room => targets.has(room.id) ? { ...room, targetC: targets.get(room.id) } : room) };
+          thermal = { ...thermal, rooms: thermal.rooms.map(room => ({ ...room,
+            ...(targets.has(room.id) ? { targetC: targets.get(room.id) } : {}),
+            ...(enabledRooms.has(room.id) ? { heatingEnabled: enabledRooms.get(room.id) } : {}) })) };
           snapshot = await store.update({ thermal });
           thermal = snapshot.thermal;
           for (const source of thermal.sources) {
             const room = thermal.rooms.find(room => room.id === source.controlRoomId && room.sourceIds.includes(source.id));
             const previous = targetMemory.get(source.id);
-            if (previous && targets.has(room?.id)) previous.signature = JSON.stringify({ source, room });
+            if (previous && (targets.has(room?.id) || enabledRooms.has(room?.id))) previous.signature = JSON.stringify({ source, room });
           }
         }
       }
@@ -81,14 +89,14 @@ export function createRuleRunner({ store, provider, unitProvider, execute, activ
         if (previous.pending) {
           const expected = previous.pending;
           const confirmed = typeof expected.value === 'number' ? Math.abs(decision.observed - expected.value) < 0.001 : decision.observed === expected.value;
-          if (!confirmed) {
+          if (!confirmed && !heating) {
             decision.command = null;
             decision.status = now - expected.sentAt > 120000 ? 'paused' : 'waiting';
             decision.reason = 'Wachten op apparaatbevestiging; er wordt niet automatisch opnieuw verzonden.';
             if (decision.status === 'paused') previous.faulted = true;
             continue;
           }
-          previous.pending = null;
+          if (confirmed) previous.pending = null;
           previous.observed = decision.observed;
         }
         previous.observed = decision.observed;
@@ -112,7 +120,7 @@ export function createRuleRunner({ store, provider, unitProvider, execute, activ
           await execute(decision.command);
           previous.pending = { value: decision.command.service.startsWith('switch.') ? decision.command.service.endsWith('turn_on') ? 'on' : 'off' : decision.command.value, sentAt: clock() };
           previous.sentAt = clock();
-          decision.status = 'sent'; decision.reason = 'Opdracht verzonden; apparaatbevestiging volgt.';
+          decision.status = 'sent'; decision.reason = heating ? 'Warmteopdracht uitgevoerd.' : 'Opdracht verzonden; apparaatbevestiging volgt.';
           sentEntities.add(actuator.id); sent++;
         } catch {
           previous.faulted = true;

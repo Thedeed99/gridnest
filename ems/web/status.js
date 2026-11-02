@@ -27,10 +27,10 @@ export function roomClimateFeedback(result, roomId, enabled) {
   if (!sources.length) return { message: 'Instelling opgeslagen; kies een vrijgegeven warmtebron met deze kamer als regelkamer.', error: true };
   const issue = decisions.find(decision => ['blocked', 'paused', 'waiting'].includes(decision.status));
   if (issue) return { message: `Instelling opgeslagen; ${issue.reason}`, error: issue.status !== 'waiting' };
-  if (decisions.some(decision => decision.status === 'sent')) return { message: 'Opdracht verzonden; wachten op bevestiging van het apparaat.', error: false };
+  if (decisions.some(decision => decision.status === 'sent')) return { message: enabled ? 'Inschakelen verstuurd.' : 'Uitschakelen verstuurd.', error: false };
   const modes = decisions.filter(decision => decision.definition?.action?.type === 'climate_mode');
   if (modes.length === sources.length && modes.every(decision => decision.status === 'stable' && (enabled ? ['heat', 'cool'].includes(decision.observed) : decision.observed === 'off'))) {
     return { message: enabled ? 'Klimaatstand bevestigd door het apparaat.' : 'Uitschakelen bevestigd door het apparaat.', error: false };
   }
-  return { message: 'Instelling opgeslagen; de gewenste apparaatstand is nog niet bevestigd.', error: true };
+  return { message: 'Geen schakelopdracht uitgevoerd; controleer de bron en regelkamer.', error: true };
 }
