@@ -31,6 +31,26 @@ nav button:hover { background: var(--nav-hover); }
 nav button[aria-current] { background: var(--nav-current); color: var(--green); }
 .sidebar-bottom { margin-top: auto; padding: 32px 12px 0; color: var(--muted); font-size: 12px; }
 .sidebar-bottom small { display: block; margin-top: 8px; }
+.sidebar-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sidebar-header .brand { min-width: 0; gap: 10px; padding: 0; font-size: 16px; }
+.sidebar-header .brand-icon { width: 32px; height: 32px; flex-shrink: 0; }
+.sidebar-header .brand-icon svg { width: 21px; height: 21px; }
+.sidebar .sidebar-toggle, #mobile-menu-toggle { width: 36px; height: 36px; border: 1px solid var(--input-border); border-radius: 50%; background: var(--nav-hover); color: var(--muted); }
+.sidebar-toggle:hover, #mobile-menu-toggle:hover { background: var(--nav-current); }
+.sidebar .sidebar-toggle svg, #mobile-menu-toggle svg { width: 17px; height: 17px; stroke-width: 1.5; }
+:root[data-theme="homify"] .sidebar-toggle, :root[data-theme="homify"] #mobile-menu-toggle { border-color: rgba(255,231,198,.26); background: rgba(224,176,112,.07); color: #f5debd; }
+.sidebar nav { margin-top: 28px; gap: 6px; }
+.sidebar nav button { min-width: 0; min-height: 44px; font-size: 12px; font-weight: 500; }
+.sidebar .nav-label { min-width: 0; overflow-wrap: anywhere; }
+@media (min-width: 681px) {
+	.shell.sidebar-collapsed { grid-template-columns: 82px minmax(0, 1fr); }
+	.sidebar { padding: 26px 16px 22px; background: var(--page); }
+	.sidebar-collapsed .sidebar { padding-inline: 14px; }
+	.sidebar-collapsed .sidebar-header { flex-direction: column; gap: 14px; }
+	.sidebar-collapsed .brand-label, .sidebar-collapsed .nav-label, .sidebar-collapsed .sidebar-bottom { display: none; }
+	.sidebar-collapsed .sidebar nav button { justify-content: center; padding-inline: 0; }
+}
+@media (max-width: 680px) { .sidebar .sidebar-toggle { display: none; } }
 .status-dot { display: inline-block; width: 7px; height: 7px; background: var(--green); border-radius: 50%; margin-right: 6px; }
 .workspace { min-width: 0; }
 .topbar { height: 70px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 42px; background: var(--surface); border-bottom: 1px solid var(--line); font-size: 13px; }

@@ -47,6 +47,8 @@ Onder **Bekende verbruikers** kies je een van twee bronnen:
 
 De themaknop bovenaan opent de keuze tussen Licht, Donker en Homify. Het Homify-thema gebruikt dezelfde warme achtergrond-, tekst- en accentkleuren als Homify. De keuze wordt in deze browser onthouden. Energiestromen heeft in alle thema's een effen achtergrond; de stroomlijnen en hun animatie blijven behouden.
 
+Op desktop kun je de zijbalk met het knopje naast het logo inklappen tot een smalle iconenbalk. De menunamen blijven beschikbaar als tooltip en toegankelijk label. In- of uitgeklapt wordt in deze browser onthouden. Op mobiel opent de menuknop altijd de volledige navigatielade, onafhankelijk van de desktopvoorkeur.
+
 Selecteer geen groepmeter samen met de onderliggende apparaten. Gridnest kan een fysieke overlap tussen verschillende sensoren niet automatisch herkennen. Een exact dubbele entiteit en gekoppelde woning-, productie-, net- of batterijmeters als los apparaat worden geweigerd.
 
 Elke verbruikerstegel toont rechtsonder het verbruik van vandaag in kWh, vanaf middernacht in de Home Assistant-tijdzone tot nu; dit is geen schuivende periode van 24 uur. Het teken `~` markeert een schatting uit de vermogenshistorie. De tooltip vermeldt wanneer de historie onvolledig is. Zonder bruikbare daghistorie staat er `Vandaag: n.b.`, niet nul. Na middernacht wordt een eerder dagtotaal niet als vandaag getoond. Historie moet in Home Assistant worden bewaard voor de geselecteerde vermogenssensoren.
