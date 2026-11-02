@@ -277,6 +277,12 @@ export function createApp({ store, entitiesProvider, demo = false, supervisor = 
     await runner?.tick();
     response.json({ preferences });
   });
+  app.put('/api/thermal/overview', async (request, response) => {
+    const body = z.object({ show: z.boolean() }).strict().parse(request.body);
+    const preferences = { ...store.get().preferences, showThermalOverview: body.show };
+    await store.update({ preferences });
+    response.json({ preferences });
+  });
   app.put('/api/thermal', async (request, response) => {
     const connection = await entitiesProvider();
     let thermal;

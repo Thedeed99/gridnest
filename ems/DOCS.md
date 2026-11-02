@@ -113,6 +113,8 @@ Onder **Verwarmingsprofiel** kun je vloerverwarming, airco/lucht-luchtwarmtepomp
 
 Het algemene **Overzicht** bevat een compacte warmtesamenvatting met kamers op verdiepingsvolgorde, gemeten temperaturen, vaste kamerdoelen, aanwezigheid en bronstatussen. Een eventueel hoger zonnedoel wordt apart getoond. De samenvatting gebruikt dezelfde gegevens en kamerweergave als Warmte, ververst automatisch en heeft een doorklik per kamer. Instellingen en verwarmingsadvies staan niet in deze samenvatting.
 
+Op het tabblad **Warmte** bepaalt **Warmte in huis tonen op startpagina** of deze samenvatting op Overzicht zichtbaar is. De keuze wordt direct opgeslagen en blijft behouden na herstarten. Het verbergen stopt of pauzeert de warmtesturing niet; kamers en bediening blijven op Warmte beschikbaar. Standaard staat het vinkje aan, ook bij bestaande instellingen.
+
 Het scherm **Warmte** toont zelf aangemaakte kamers per verdieping. Gebruik de plusknop voor een kamer, of de plusknop bij een verdieping om daar een kamer toe te voegen. De verdiepingdropdown bevat Kelder, Begane grond, 1e verdieping, 2e verdieping en Zolder. Bestaande afwijkende verdiepingsnamen blijven beschikbaar zodat opgeslagen kamers behouden blijven. Dezelfde verdieping groepeert kamers samen.
 
 Een kamer heeft een naam, verdieping, optionele temperatuursensor, optionele aanwezigheidssensor, gewenste temperatuur en nul of meer warmtebronnen. Het startdoel van een nieuwe kamer komt uit je algemene comfortwens. Daarna is het doel per kamer opgeslagen; algemene wijzigingen overschrijven bestaande kamerdoelen niet.
