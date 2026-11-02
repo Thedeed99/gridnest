@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { dailyEnergyRecap, dailyOverviewRows, demoDailyRecap, recapMeters, readDailyRecap } from '../src/daily-recap.js';
+import { consumerDayReading, dailyEnergyRecap, dailyOverviewRows, demoDailyRecap, recapMeters, readDailyRecap } from '../src/daily-recap.js';
 import { emptyMappings } from '../src/home-assistant.js';
 import { cumulativeSolarToday, readSolarMeterToday } from '../src/solar-meter.js';
 
@@ -110,14 +110,15 @@ test('dagrecap kiest alleen gekoppelde elektrische vermogensmeters', () => {
   assert.deepEqual(meters.map(meter => meter.label), ['Netafname', 'Koelkast']);
 });
 
-test('dagrecap leest in één GET alleen de ingestelde entiteiten', async () => {
+test('dagrecap leest HA-tijdzone en daarna alleen de ingestelde entiteiten', async () => {
   const now = new Date(2026, 9, 12, 1);
   const meters = [{ id: 'sensor.grid', label: 'Netafname', kind: 'import', unit: 'W' }];
   let requested;
   const result = await readDailyRecap({ SUPERVISOR_TOKEN: 'test-token' }, meters, async (url, options) => {
+    if (new URL(url).pathname.endsWith('/config')) return { ok: true, json: async () => ({ time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone }) };
     requested = { url: new URL(url), options };
     return { ok: true, json: async () => [[
-      { last_changed: new Date(2026, 9, 11, 23, 45).toISOString(), state: '500' },
+      { entity_id: 'sensor.grid', last_changed: new Date(2026, 9, 11, 23, 45).toISOString(), state: '500' },
       ...Array.from({ length: 5 }, (_, index) => ({ last_changed: new Date(2026, 9, 12, 0, (index + 1) * 15).toISOString(), state: '500' }))
     ]] };
   }, now);
@@ -172,4 +173,49 @@ test('officiele Energie-totalen gaan voor en behouden opt-in voor gas en water',
   assert.equal(result[0].source, 'home-assistant');
   assert.equal(result.at(-1).value, 1.49);
   assert.ok(!dailyOverviewRows(recap, mappings).some(row => row.label === 'Gas'));
+});
+
+test('ontbrekend officieel woningverbruik verbergt geen beschikbare dagschatting', () => {
+  const mappings = { ...emptyMappings, totalConsumption: 'sensor.total' };
+  const recap = { rows: [{ label: 'Woningverbruik', entityId: 'sensor.total', energyKwh: 4.2, complete: false }],
+    officialRows: [{ label: 'Woningverbruik', value: null, complete: false, source: 'home-assistant' }] };
+  assert.equal(dailyOverviewRows(recap, mappings)[0].value, 4.2);
+  assert.equal(dailyOverviewRows(recap, mappings)[0].source, 'estimate');
+  recap.rows = [];
+  assert.equal(dailyOverviewRows(recap, mappings)[0].value, null);
+});
+
+test('verbruikers tellen vanaf HA-middernacht en tonen gisteren niet als vandaag', () => {
+  const meter = { id: 'sensor.consumer', label: 'Verbruiker', kind: 'consumption', unit: 'W' };
+  const now = new Date('2026-11-02T01:00:00Z');
+  const history = [[{ last_changed: '2026-11-01T22:45:00Z', state: '1000' }]];
+  const recap = dailyEnergyRecap(history, [meter], now, 'Europe/Amsterdam');
+  assert.equal(recap.periodStart, '2026-11-01T23:00:00.000Z');
+  assert.equal(consumerDayReading(recap, meter.id, now).energyKwh, 2);
+  assert.equal(consumerDayReading(recap, meter.id, new Date('2026-11-02T23:01:00Z')), null);
+  assert.equal(consumerDayReading(recap, 'sensor.missing', now), null);
+  assert.equal(consumerDayReading({ ...recap, rows: [{ ...recap.rows[0], energyKwh: 0 }] }, meter.id, now).energyKwh, 0);
+});
+
+test('ontbrekende of anders gesorteerde HA-historie verschuift geen verbruikers', async () => {
+  const meters = ['missing', 'first', 'second'].map(name => ({ id: `sensor.${name}`, label: name, kind: 'consumption', unit: 'W' }));
+  const recap = await readDailyRecap({ SUPERVISOR_TOKEN: 'fake' }, meters, async url => ({ ok: true, json: async () =>
+    new URL(url).pathname.endsWith('/config') ? { time_zone: 'Europe/Amsterdam' } : [
+      [{ entity_id: 'sensor.second', last_changed: '2026-11-01T22:45:00Z', state: '2000' }],
+      [{ entity_id: 'sensor.first', last_changed: '2026-11-01T22:45:00Z', state: '1000' }]
+    ] }), new Date('2026-11-02T00:00:00Z'));
+  assert.deepEqual(recap.rows.map(row => row.energyKwh), [null, 1, 2]);
+});
+
+test('kalenderdag telt 23 of 25 uur op zomertijdwissels', () => {
+  const meter = { id: 'sensor.solar', label: 'Zonnepanelen', kind: 'production', unit: 'W' };
+  for (const [start, end, hours] of [
+    ['2026-03-28T23:00:00Z', '2026-03-29T21:59:59Z', 23],
+    ['2026-10-24T22:00:00Z', '2026-10-25T22:59:59Z', 25]
+  ]) {
+    const history = [Array.from({ length: hours * 4 }, (_, index) => ({ last_changed: new Date(Date.parse(start) + index * 900000).toISOString(), state: '1000' }))];
+    const row = dailyEnergyRecap(history, [meter], new Date(end), 'Europe/Amsterdam').rows[0];
+    assert.equal(row.periods.length, hours * 2);
+    assert.ok(Math.abs(row.energyKwh - (hours - 1 / 3600)) < 0.000001);
+  }
 });

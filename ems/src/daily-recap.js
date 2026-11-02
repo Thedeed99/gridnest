@@ -1,10 +1,17 @@
+import { DateTime } from 'luxon';
+import { energyDayRange } from './energy-statistics.js';
+
 const MAX_GAP_MS = 30 * 60 * 1000;
 const HALF_HOUR_MS = 30 * 60 * 1000;
 
-function startOfLocalDay(now) {
-  const start = new Date(now);
-  start.setHours(0, 0, 0, 0);
-  return start.getTime();
+function startOfLocalDay(now, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone) {
+  return Date.parse(energyDayRange(now, timeZone).start);
+}
+
+export function consumerDayReading(recap, entityId, now = new Date()) {
+  if (!recap?.timeZone || recap.periodStart !== energyDayRange(now, recap.timeZone).start) return null;
+  const row = recap.rows.find(row => row.entityId === entityId && row.kind === 'consumption');
+  return Number.isFinite(row?.energyKwh) ? row : null;
 }
 
 export function recapMeters(mappings, entities) {
@@ -42,7 +49,7 @@ export function dailyOverviewRows(recap, mappings, utilities = {}) {
     const combined = new Map(estimated.map(row => [row.label, row]));
     for (const [label, row] of official) {
       if (label === 'Gas' && !utilities.gas || label === 'Water' && !utilities.water) continue;
-      combined.set(label, row);
+      if (Number.isFinite(row.value) || !Number.isFinite(combined.get(label)?.value)) combined.set(label, row);
     }
     return ['Woningverbruik', 'Teruglevering', 'Zonnepanelen', 'Laadpaal', 'Batterij laden', 'Batterij ontladen', 'Gas', 'Water']
       .filter(label => combined.has(label)).map(label => combined.get(label));
@@ -94,9 +101,10 @@ function wattsFor(state, meter) {
   return meter.signed || watts >= 0 ? watts : null;
 }
 
-export function dailyEnergyRecap(history, meters, now = new Date()) {
-  const start = startOfLocalDay(now);
+export function dailyEnergyRecap(history, meters, now = new Date(), timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone) {
+  const start = startOfLocalDay(now, timeZone);
   const end = now.getTime();
+  const dayEnd = DateTime.fromMillis(start, { zone: timeZone }).plus({ days: 1 }).toMillis();
   const rows = [];
   meters.forEach((meter, index) => {
     const states = (Array.isArray(history?.[index]) ? history[index] : [])
@@ -108,7 +116,7 @@ export function dailyEnergyRecap(history, meters, now = new Date()) {
     let complete = Boolean(previous && start - previous.timestamp <= MAX_GAP_MS);
     let coverageMs = 0;
     const totals = new Map();
-    const periods = Array.from({ length: 48 }, (_, index) => ({ index, energyKwh: 0, coverageMs: 0, complete: true }));
+    const periods = Array.from({ length: Math.round((dayEnd - start) / HALF_HOUR_MS) }, (_, index) => ({ index, energyKwh: 0, coverageMs: 0, complete: true }));
 
     for (let pointIndex = 0; pointIndex < points.length; pointIndex++) {
       const point = points[pointIndex];
@@ -159,7 +167,8 @@ export function dailyEnergyRecap(history, meters, now = new Date()) {
         }) } : {}) });
     }
   });
-  return { available: rows.some(row => row.energyKwh !== null), complete: rows.length > 0 && rows.every(row => row.complete), rows };
+  return { available: rows.some(row => row.energyKwh !== null), complete: rows.length > 0 && rows.every(row => row.complete), rows,
+    periodStart: new Date(start).toISOString(), timeZone };
 }
 
 export function demoDailyRecap(meters, now = new Date()) {
@@ -184,18 +193,23 @@ export async function readDailyRecap(env, meters, request = fetch, now = new Dat
   const token = supervisor ? env.SUPERVISOR_TOKEN : env.HA_TOKEN;
   const base = supervisor ? 'http://supervisor/core/api' : env.HA_URL;
   if (!token || !base) throw new Error('Home Assistant-historie niet beschikbaar.');
-  const start = new Date(startOfLocalDay(now) - MAX_GAP_MS);
-  const end = new Date(now);
+  const configUrl = new URL(`${base.replace(/\/$/, '')}/config`);
+  if (!['http:', 'https:'].includes(configUrl.protocol) || configUrl.username || configUrl.password) throw new Error('Ongeldig Home Assistant-adres.');
+  const options = { headers: { Authorization: `Bearer ${token}` }, redirect: 'error' };
+  const configResponse = await request(configUrl, { ...options, signal: AbortSignal.timeout(15000) });
+  if (!configResponse.ok) throw new Error('Home Assistant-tijdzone niet beschikbaar.');
+  const config = await configResponse.json();
+  const range = energyDayRange(now, config.time_zone);
+  const start = new Date(Date.parse(range.start) - MAX_GAP_MS);
   const url = new URL(`${base.replace(/\/$/, '')}/history/period/${encodeURIComponent(start.toISOString())}`);
-  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new Error('Ongeldig Home Assistant-adres.');
   const ids = [...new Set(meters.map(meter => meter.id))];
   url.searchParams.set('filter_entity_id', ids.join(','));
-  url.searchParams.set('end_time', end.toISOString());
+  url.searchParams.set('end_time', range.end);
   url.searchParams.set('minimal_response', '');
   url.searchParams.set('no_attributes', '');
-  const response = await request(url, { headers: { Authorization: `Bearer ${token}` }, redirect: 'error', signal: AbortSignal.timeout(15000) });
+  const response = await request(url, { ...options, signal: AbortSignal.timeout(15000) });
   if (!response.ok) throw new Error(`Dagrecap niet beschikbaar (HTTP ${response.status}).`);
   const responseHistory = await response.json();
-  const historyById = new Map(ids.map((id, index) => [id, responseHistory[index] ?? []]));
-  return dailyEnergyRecap(meters.map(meter => historyById.get(meter.id)), meters, now);
+  const historyById = new Map(responseHistory.filter(states => Array.isArray(states) && states.length).map(states => [states[0].entity_id, states]));
+  return dailyEnergyRecap(meters.map(meter => historyById.get(meter.id)), meters, now, config.time_zone);
 }

@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.0.12 - 2026-11-02
+
+- Voeg een derde kleurthema Homify toe naast Licht en Donker, met onthouden keuze via het themamenu.
+- Verwijder de decoratieve stippenachtergrond bij Energiestromen in alle thema's.
+- Zet een spatie na het schattingsteken in de dagwaarde en voorkom overlap op smalle verbruikerstegels.
+- Toon rechtsonder op iedere verbruikerstegel het kalenderdagverbruik sinds Home Assistant-middernacht, als historieschatting in kWh; houd nul en ontbrekende historie apart.
+- Behoud beschikbare dagrecapschattingen wanneer een officieel totaal ontbreekt en geef officiele zonneproductie ook afzonderlijk terug.
+- Gebruik de Home Assistant-tijdzone voor vermogenshistorie, inclusief zomer-/wintertijd, en koppel historie op sensor-ID in plaats van antwoordvolgorde.
+
 ## 2.0.11 - 2026-11-01
 
 - Neem externe thermostaatdoelwijzigingen over in het gekoppelde kamerdoel voor actieve CV-, vloerverwarming- en aircoregeling, zonder pauze of terugzetten naar de oude temperatuur. Eigen commandoterugmeldingen, waaronder zonneboost, veranderen het kamerdoel niet.

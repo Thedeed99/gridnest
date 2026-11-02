@@ -12,7 +12,8 @@ test('officiele recap gebruikt de Energie-instellingen en geen vermogensschattin
   const rows = officialEnergyRows(groups, statistics, [{ statistic_id: 'sensor.gas', statistics_unit_of_measurement: 'm³' }]);
   assert.ok(Math.abs(rows[0].value - 10.76) < 0.000001);
   assert.equal(rows[1].value, 0.05);
-  assert.equal(rows[2].value, 1.49);
+  assert.equal(rows.find(row => row.label === 'Zonnepanelen').value, 0.21);
+  assert.equal(rows.find(row => row.label === 'Gas').value, 1.49);
   assert.ok(rows.every(row => row.source === 'home-assistant'));
 });
 

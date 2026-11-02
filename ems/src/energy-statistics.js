@@ -50,6 +50,7 @@ export function officialEnergyRows(groups, statistics, metadata = []) {
     add('Woningverbruik', parts.some(value => value === null) ? null : parts[0] + parts[1] + parts[2] - parts[3] - parts[4]);
   }
   if (groups.imported.length || groups.exported.length) add('Teruglevering', groups.exported.length ? total(groups.exported) : null);
+  if (groups.solar.length) add('Zonnepanelen', total(groups.solar));
   if (groups.ev.length) add('Laadpaal', total(groups.ev));
   if (groups.charged.length) add('Batterij laden', total(groups.charged));
   if (groups.discharged.length) add('Batterij ontladen', total(groups.discharged));
