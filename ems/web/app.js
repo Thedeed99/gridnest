@@ -662,7 +662,9 @@ function consumptionSplit() {
       const switchId = data.mappings.knownConsumerSwitches?.[consumer.id];
       row.dataset.consumerId = consumer.id;
       row.dataset.state = 'unknown';
-      row.append(element('span', 'consumer-name', consumer.name), liveText('strong', 'consumer-value', () => {
+      const header = element('div', 'consumer-tile-header');
+      header.append(element('span', 'consumer-name', consumer.name));
+      row.append(header, liveText('strong', 'consumer-value', () => {
         const current = data.energy?.consumers?.find(item => item.id === consumer.id);
         return powerText(current?.powerKw ?? null);
       }));
@@ -734,7 +736,7 @@ function consumptionSplit() {
           toggle.disabled = !known || !data.controlStatus?.activeAllowed;
           row.dataset.state = known ? actuator.state : 'unknown';
         });
-        row.append(toggle);
+        header.append(toggle);
       }
       list.append(row);
     }
