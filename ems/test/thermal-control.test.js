@@ -149,6 +149,76 @@ test('handmatig inschakelen respecteert een airco die alleen kan koelen en blokk
   assert.ok(planThermal({ ...input, manualAction: true, manualRoomId: 'living' }).every(decision => decision.command === null));
 });
 
+test('handmatige warmteopdrachten wachten niet op terugmelding van eerdere opdrachten', async () => {
+  const input = fixture();
+  input.thermal.mode = 'active';
+  input.thermal.sources[0].profile = 'airco';
+  input.entities[1].changedAt = new Date(now).toISOString();
+  const snapshot = { control: input.settings, thermal: input.thermal, mappings: input.mappings, preferences: {} };
+  const sent = [];
+  let time = now;
+  const runner = createRuleRunner({ store: { get: () => structuredClone(snapshot) },
+    provider: async () => ({ connected: true, entities: input.entities.map(entity => ({ ...entity, reportedAt: new Date(time).toISOString() })) }),
+    unitProvider: async () => '\u00b0C', execute: async command => sent.push(command), activeAllowed: true, clock: () => time });
+  for (const offset of [0, 30000, 180000]) {
+    time = now + offset;
+    const result = await runner.tick({ manualAction: true, manualRoomId: 'living' });
+    assert.ok(result.decisions.every(decision => decision.status === 'sent'));
+    assert.equal(result.error, undefined);
+  }
+  assert.equal(sent.filter(command => command.service === 'climate.set_temperature').length, 3);
+  assert.equal(sent.filter(command => command.service === 'climate.set_hvac_mode').length, 3);
+});
+
+for (const profile of ['underfloor', 'airco']) {
+  test(`${profile}: externe aan-uitwijzigingen en temperatuur worden overgenomen zonder terugschakelen`, async () => {
+    const input = fixture();
+    input.thermal.mode = 'active';
+    input.thermal.sources[0].profile = profile;
+    input.entities[1] = { ...input.entities[1], state: 'heat', targetTemperature: 21, changedAt: new Date(now - 3600000).toISOString() };
+    const snapshot = { control: input.settings, thermal: input.thermal, mappings: input.mappings, preferences: {} };
+    const sent = [];
+    let time = now;
+    const runner = createRuleRunner({ store: { get: () => structuredClone(snapshot), update: async patch => { Object.assign(snapshot, structuredClone(patch)); return structuredClone(snapshot); } },
+      provider: async () => ({ connected: true, entities: input.entities.map(entity => ({ ...entity, reportedAt: new Date(time).toISOString() })) }),
+      unitProvider: async () => '\u00b0C', execute: async command => sent.push(command), activeAllowed: true, clock: () => time });
+    await runner.tick();
+    input.entities[1].state = 'off';
+    input.entities[1].targetTemperature = 20;
+    time += 30000;
+    await runner.tick();
+    assert.equal(snapshot.thermal.rooms[0].heatingEnabled, false);
+    assert.equal(snapshot.thermal.rooms[0].targetC, 20);
+    assert.deepEqual(sent, []);
+    input.entities[1].state = 'heat';
+    time += 30000;
+    await runner.tick();
+    assert.equal(snapshot.thermal.rooms[0].heatingEnabled, true);
+    assert.deepEqual(sent, []);
+  });
+}
+
+test('een eigen uitschakelopdracht wordt niet als externe aan-uitwijziging opgeslagen', async () => {
+  const input = fixture();
+  input.thermal.mode = 'active';
+  input.thermal.sources[0].profile = 'airco';
+  input.entities[1] = { ...input.entities[1], state: 'cool', targetTemperature: 21, hvacModes: ['cool', 'off'], changedAt: new Date(now - 3600000).toISOString() };
+  const snapshot = { control: input.settings, thermal: input.thermal, mappings: input.mappings, preferences: {} };
+  const sent = [];
+  let time = now;
+  let updates = 0;
+  const runner = createRuleRunner({ store: { get: () => structuredClone(snapshot), update: async patch => { updates++; Object.assign(snapshot, structuredClone(patch)); return structuredClone(snapshot); } },
+    provider: async () => ({ connected: true, entities: input.entities.map(entity => ({ ...entity, reportedAt: new Date(time).toISOString() })) }),
+    unitProvider: async () => '\u00b0C', execute: async command => sent.push(command), activeAllowed: true, clock: () => time });
+  await runner.tick();
+  assert.deepEqual(sent, [{ entityId: 'climate.cv', service: 'climate.set_hvac_mode', value: 'off' }]);
+  input.entities[1].state = 'off';
+  time += 30000;
+  await runner.tick();
+  assert.equal(snapshot.thermal.rooms[0].heatingEnabled, true);
+  assert.equal(updates, 0);
+});
+
 test('handmatig kamerdoel zonder gekoppelde warmtebron stuurt alleen de thermostaattemperatuur', () => {
   const input = fixture();
   input.thermal.sources = [];

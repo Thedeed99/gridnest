@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.16 - 2026-11-02
+
+- Verwijder de apparaatbevestigingsblokkade voor Warmte: nieuwe handmatige opdrachten worden direct verstuurd, ook bij trage terugmelding. De stroomregelbeveiliging blijft behouden.
+- Verwijder de wachtstand uit het klimaatvinkje en toon direct de aangevraagde instelling; meld versturen of een fout zonder bevestigingswachtstand.
+- Neem externe aan/uitwijzigingen voor airco en vloerverwarming over naast externe temperatuurwijzigingen, zonder eigen opdrachtterugmeldingen als externe bediening op te slaan.
+
 ## 2.0.15 - 2026-11-02
 
 - Geef bij het klimaatvinkje de bediende kamer mee, zodat expliciet inschakelen als handmatige kameractie wordt uitgevoerd.
