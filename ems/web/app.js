@@ -3904,6 +3904,25 @@ function navigate(next) {
 document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', () => navigate(button.dataset.view)));
 document.querySelector('#refresh').addEventListener('click', () => refresh(true));
 const sidebar = document.querySelector('.sidebar');
+const shell = document.querySelector('.shell');
+const sidebarToggle = document.querySelector('#sidebar-toggle');
+let sidebarCollapsed = false;
+try { sidebarCollapsed = localStorage.getItem('gridnest-sidebar-collapsed') === 'true'; } catch {}
+function applySidebarState() {
+  shell.classList.toggle('sidebar-collapsed', sidebarCollapsed);
+  const label = sidebarCollapsed ? 'Zijbalk uitklappen' : 'Zijbalk inklappen';
+  sidebarToggle.setAttribute('aria-expanded', String(!sidebarCollapsed));
+  sidebarToggle.setAttribute('aria-label', label);
+  sidebarToggle.title = label;
+  sidebarToggle.replaceChildren(icon('menu'));
+  createIcons({ icons });
+}
+applySidebarState();
+sidebarToggle.addEventListener('click', () => {
+  sidebarCollapsed = !sidebarCollapsed;
+  try { localStorage.setItem('gridnest-sidebar-collapsed', String(sidebarCollapsed)); } catch {}
+  applySidebarState();
+});
 const menuToggle = document.querySelector('#mobile-menu-toggle');
 const menuBackdrop = document.querySelector('#nav-backdrop');
 function closeMobileMenu() {

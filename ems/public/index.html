@@ -11,17 +11,20 @@
   <body>
     <div class="shell">
       <aside class="sidebar">
-        <a class="brand" href="./"><span class="brand-icon"><i data-lucide="house-plug"></i></span><span>Gridnest</span></a>
+        <div class="sidebar-header">
+          <a class="brand" href="./" aria-label="Gridnest"><span class="brand-icon"><i data-lucide="house-plug"></i></span><span class="brand-label">Gridnest</span></a>
+          <button id="sidebar-toggle" class="icon-button sidebar-toggle" type="button" aria-label="Zijbalk inklappen" title="Zijbalk inklappen" aria-controls="main-navigation" aria-expanded="true"><i data-lucide="menu"></i></button>
+        </div>
         <nav id="main-navigation" aria-label="Hoofdnavigatie">
-          <button type="button" data-view="overview" aria-current="page"><i data-lucide="activity"></i>Overzicht</button>
-          <button type="button" data-view="thermal"><i data-lucide="thermometer"></i>Warmte</button>
-          <button type="button" data-view="rules"><i data-lucide="list-checks"></i>Stroom</button>
-          <button type="button" data-view="ev" hidden><i data-lucide="car"></i>Laadpaal</button>
-          <button type="button" data-view="battery" hidden><i data-lucide="battery-charging"></i>Batterij</button>
-          <button type="button" data-view="solar" hidden><i data-lucide="sun"></i>Zonnepanelen</button>
-          <button type="button" data-view="tariffs"><i data-lucide="activity"></i>Tarieven</button>
-          <button type="button" data-view="entities"><i data-lucide="link"></i>Koppelingen</button>
-          <button type="button" data-view="preferences"><i data-lucide="sliders-horizontal"></i>Mijn wensen</button>
+          <button type="button" data-view="overview" aria-current="page" aria-label="Overzicht" title="Overzicht"><i data-lucide="activity"></i><span class="nav-label">Overzicht</span></button>
+          <button type="button" data-view="thermal" aria-label="Warmte" title="Warmte"><i data-lucide="thermometer"></i><span class="nav-label">Warmte</span></button>
+          <button type="button" data-view="rules" aria-label="Stroom" title="Stroom"><i data-lucide="list-checks"></i><span class="nav-label">Stroom</span></button>
+          <button type="button" data-view="ev" aria-label="Laadpaal" title="Laadpaal" hidden><i data-lucide="car"></i><span class="nav-label">Laadpaal</span></button>
+          <button type="button" data-view="battery" aria-label="Batterij" title="Batterij" hidden><i data-lucide="battery-charging"></i><span class="nav-label">Batterij</span></button>
+          <button type="button" data-view="solar" aria-label="Zonnepanelen" title="Zonnepanelen" hidden><i data-lucide="sun"></i><span class="nav-label">Zonnepanelen</span></button>
+          <button type="button" data-view="tariffs" aria-label="Tarieven" title="Tarieven"><i data-lucide="activity"></i><span class="nav-label">Tarieven</span></button>
+          <button type="button" data-view="entities" aria-label="Koppelingen" title="Koppelingen"><i data-lucide="link"></i><span class="nav-label">Koppelingen</span></button>
+          <button type="button" data-view="preferences" aria-label="Mijn wensen" title="Mijn wensen"><i data-lucide="sliders-horizontal"></i><span class="nav-label">Mijn wensen</span></button>
         </nav>
         <div class="sidebar-bottom"><span class="status-dot"></span><span>Lokale opslag</span><small id="mode-label">v0.1 · Regels uit</small></div>
       </aside>

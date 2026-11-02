@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.13 - 2026-11-02
+
+- Maak de desktopzijbalk subtieler en inklapbaar tot een smalle iconenbalk, met tooltips en een onthouden browservoorkeur. De mobiele navigatielade behoudt alle menulabels.
+- Gebruik dezelfde ronde hamburgerknop als Homify voor de desktopzijbalk en mobiele navigatie.
+
 ## 2.0.12 - 2026-11-02
 
 - Voeg een derde kleurthema Homify toe naast Licht en Donker, met onthouden keuze via het themamenu.
