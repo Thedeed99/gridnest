@@ -375,6 +375,34 @@ test('dagrecap-API retourneert de meters voor het overzicht', async context => {
   assert.equal(result.rows[0].energyKwh, 4.2);
 });
 
+test('warmteoverzicht kan apart worden verborgen en bewaard zonder regelaaracties', async context => {
+  let ticks = 0;
+  const { url, store, directory } = await fixture(context, { runner: { status: () => ({ activeAllowed: false }), tick: async () => { ticks++; } } });
+  const before = store.get();
+  assert.equal(before.preferences.showThermalOverview, true);
+  for (const show of [false, true]) {
+    const response = await fetch(`${url}/api/thermal/overview`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ show }) });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).preferences.showThermalOverview, show);
+    const restored = await createStore(directory, 'demo');
+    assert.equal(restored.get().preferences.showThermalOverview, show);
+    assert.deepEqual(restored.get().thermal, before.thermal);
+    assert.deepEqual(restored.get().control, before.control);
+  }
+  assert.equal(ticks, 0);
+  const invalid = await fetch(`${url}/api/thermal/overview`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ show: 'false' }) });
+  assert.equal(invalid.status, 400);
+});
+
+test('bestaande instellingen zonder warmteoverzichtvoorkeur blijven het overzicht tonen', async context => {
+  const { store, directory } = await fixture(context);
+  const config = store.get();
+  delete config.preferences.showThermalOverview;
+  await writeFile(join(directory, 'settings.json'), JSON.stringify(config));
+  const restored = await createStore(directory, 'demo');
+  assert.equal(restored.get().preferences.showThermalOverview, true);
+});
+
 test('API bewaart verwarmingsprofiel en levert advies zonder schakelcommando', async context => {
   const { url } = await fixture(context);
   const saved = await fetch(`${url}/api/preferences`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...defaultPreferences, heatingProfile: 'underfloor' }) });

@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.17 - 2026-11-02
+
+- Voeg op Warmte een vinkje toe om het warmteoverzicht op de startpagina te tonen of verbergen. De keuze blijft opgeslagen en verandert geen warmte- of stroomsturing; bestaande configuraties blijven het overzicht tonen.
+
 ## 2.0.16 - 2026-11-02
 
 - Verwijder de apparaatbevestigingsblokkade voor Warmte: nieuwe handmatige opdrachten worden direct verstuurd, ook bij trage terugmelding. De stroomregelbeveiliging blijft behouden.

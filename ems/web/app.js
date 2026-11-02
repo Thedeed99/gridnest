@@ -1272,6 +1272,7 @@ function heatOverview() {
   const live = data.thermalReadings ?? { rooms: [], sources: [] };
   const section = element('section', 'heat-overview');
   section.setAttribute('aria-label', 'Warmteoverzicht');
+  bindLive(section, () => { section.hidden = data.preferences?.showThermalOverview === false; });
   const header = element('div', 'section-heading');
   const actions = element('div', 'rule-tools');
   actions.append(liveText('span', 'tag', () => ({ off: 'UIT', preview: 'PROEFMODUS', active: 'ACTIEF' }[data.thermal?.mode] ?? 'UIT')), toolButton('arrow-up-right', 'Warmte openen', () => navigate('thermal')));
@@ -1324,6 +1325,30 @@ function thermal() {
     catch (error) { notify(error.message, true); pause.disabled = false; }
   });
   controls.append(modeLabel, saveMode, pause); main.append(controls);
+  const overviewLabel = element('label', 'checkbox-field');
+  const overviewInput = element('input');
+  overviewInput.type = 'checkbox';
+  overviewInput.name = 'showThermalOverview';
+  bindLive(overviewInput, () => {
+    if (!overviewInput.disabled) overviewInput.checked = data.preferences?.showThermalOverview !== false;
+  });
+  overviewInput.addEventListener('change', async () => {
+    const show = overviewInput.checked;
+    overviewInput.disabled = true;
+    try {
+      const result = await api('thermal/overview', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ show }) });
+      data.preferences = result.preferences;
+      if (preferencesDraft) preferencesDraft.showThermalOverview = result.preferences.showThermalOverview;
+      notify(show ? 'Warmteoverzicht zichtbaar op de startpagina.' : 'Warmteoverzicht verborgen op de startpagina.');
+    } catch (error) {
+      notify(error.message, true);
+    } finally {
+      overviewInput.disabled = false;
+      updateLiveBindings();
+    }
+  });
+  overviewLabel.append(overviewInput, element('span', '', 'Warmte in huis tonen op startpagina'));
+  main.append(overviewLabel);
   if (!config.rooms.length) main.append(element('p', 'empty-state', 'Nog geen kamers.'));
   for (const floor of sortedFloors(config.rooms)) {
     const section = element('section', 'floor-section');
