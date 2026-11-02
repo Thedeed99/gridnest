@@ -1,6 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { climateStatus, modeLabel } from '../web/status.js';
+import { climateStatus, modeLabel, roomClimateFeedback } from '../web/status.js';
+
+test('klimaatfeedback meldt verzending en bevestiging afzonderlijk en accepteert geen uit als aan', () => {
+  const result = { thermal: { mode: 'active', sources: [{ id: 'airco', controlRoomId: 'living', controlEnabled: true }] },
+    controlStatus: { decisions: [{ origin: 'thermal', sourceId: 'airco', status: 'sent', observed: 'off', definition: { action: { type: 'climate_mode' } } }] } };
+  assert.match(roomClimateFeedback(result, 'living', true).message, /Opdracht verzonden/);
+  const mode = result.controlStatus.decisions[0];
+  mode.status = 'stable';
+  assert.equal(roomClimateFeedback(result, 'living', true).error, true);
+  mode.observed = 'heat';
+  assert.match(roomClimateFeedback(result, 'living', true).message, /bevestigd/);
+  mode.observed = 'off';
+  assert.match(roomClimateFeedback(result, 'living', false).message, /Uitschakelen bevestigd/);
+  assert.equal(roomClimateFeedback(result, 'other-room', true).error, true);
+  result.controlStatus.error = 'Regelcyclus geblokkeerd';
+  assert.equal(roomClimateFeedback(result, 'living', true).error, true);
+});
 
 test('sidebar hides Proefmodus when live control has been released', () => {
   assert.equal(modeLabel({ demo: false, activeAllowed: true, mode: 'preview' }), 'Sturing vrijgegeven');

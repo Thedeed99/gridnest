@@ -115,6 +115,40 @@ test('handmatig doel schakelt een uitgeschakelde thermostaat direct in dezelfde 
   assert.equal(result.decisions.find(item => item.id === 'thermal:cv:mode').status, 'sent');
 });
 
+for (const profile of ['underfloor', 'airco']) {
+  test(`${profile}: handmatig inschakelen op de doeltemperatuur stuurt direct heat`, async () => {
+    const input = fixture();
+    input.thermal.mode = 'active';
+    input.thermal.sources[0].profile = profile;
+    input.thermal.rooms[0].heatingEnabled = true;
+    input.entities[0].state = '21';
+    input.entities[1] = { ...input.entities[1], state: 'off', targetTemperature: 21, hvacModes: ['heat', 'cool', 'off'], changedAt: new Date(now).toISOString() };
+    assert.equal(planThermal(input)[0].command, null);
+    const snapshot = { control: input.settings, thermal: input.thermal, mappings: input.mappings, preferences: {} };
+    const sent = [];
+    const runner = createRuleRunner({ store: { get: () => structuredClone(snapshot) },
+      provider: async () => ({ connected: true, entities: input.entities }), unitProvider: async () => '\u00b0C',
+      execute: async command => sent.push(command), activeAllowed: true, clock: () => now });
+    const result = await runner.tick({ manualAction: true, manualRoomId: 'living' });
+    assert.deepEqual(sent, [{ entityId: 'climate.cv', service: 'climate.set_hvac_mode', value: 'heat' }]);
+    assert.equal(result.decisions.find(decision => decision.id === 'thermal:cv:mode').status, 'sent');
+    input.entities[1].state = 'heat';
+    assert.equal((await runner.tick()).decisions.find(decision => decision.id === 'thermal:cv:mode').status, 'stable');
+    assert.equal(sent.length, 1);
+  });
+}
+
+test('handmatig inschakelen respecteert een airco die alleen kan koelen en blokkeert offline bediening', () => {
+  const input = fixture();
+  input.thermal.sources[0].profile = 'airco';
+  input.entities[0].state = '21';
+  input.entities[1] = { ...input.entities[1], state: 'off', targetTemperature: 21, hvacModes: ['cool', 'off'] };
+  const plans = planThermal({ ...input, manualAction: true, manualRoomId: 'living' });
+  assert.deepEqual(plans.find(decision => decision.id === 'thermal:cv:mode').command, { entityId: 'climate.cv', service: 'climate.set_hvac_mode', value: 'cool' });
+  input.entities[1].available = false;
+  assert.ok(planThermal({ ...input, manualAction: true, manualRoomId: 'living' }).every(decision => decision.command === null));
+});
+
 test('handmatig kamerdoel zonder gekoppelde warmtebron stuurt alleen de thermostaattemperatuur', () => {
   const input = fixture();
   input.thermal.sources = [];

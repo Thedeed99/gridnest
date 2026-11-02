@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.15 - 2026-11-02
+
+- Geef bij het klimaatvinkje de bediende kamer mee, zodat expliciet inschakelen als handmatige kameractie wordt uitgevoerd.
+- Schakel airco en vloerverwarming bij een expliciete aan-actie ook op de doeltemperatuur naar een ondersteunde actieve modus; automatische cycli blijven ongewijzigd.
+- Maak onderscheid tussen opgeslagen instellingen, verzonden opdrachten en bevestigde apparaatstanden. Toon een tussenstand tijdens het wachten op terugmelding en meld geen succes zonder bedienbare regelkamer.
+
 ## 2.0.14 - 2026-11-02
 
 - Geef bewerk- en bevestigingsdialogen in het Homify-thema een ondoorzichtige achtergrond, zodat onderliggende kamerinhoud niet door het formulier schijnt.
