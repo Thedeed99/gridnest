@@ -2,7 +2,7 @@ import { createIcons, Activity, Link, SlidersHorizontal, RefreshCw, HousePlug, H
 import { Chart } from 'chart.js/auto';
 import { DateTime } from 'luxon';
 import { createId } from './ids.js';
-import { climateStatus, modeLabel, onlyRoomTargetChanged } from './status.js';
+import { climateStatus, modeLabel, onlyRoomTargetChanged, roomClimateFeedback } from './status.js';
 import { formatPower } from './power.js';
 import { consumerDayReading, dailyOverviewRows } from '../src/daily-recap.js';
 import { isCumulativeSolarMeter } from '../src/solar-meter.js';
@@ -1179,7 +1179,11 @@ function roomCard(room, config, live, compact = false) {
       } else {
         input.checked = roomEnabled;
       }
-      label.textContent = input.checked ? 'Klimaat aan' : 'Klimaat uit';
+      const sourceIds = (data.thermal?.sources ?? []).filter(source => source.controlRoomId === room.id && source.controlEnabled).map(source => source.id);
+      const pending = (data.controlStatus?.decisions ?? []).some(decision => decision.origin === 'thermal' && sourceIds.includes(decision.sourceId) && ['sent', 'waiting'].includes(decision.status));
+      input.indeterminate = pending;
+      if (pending) input.checked = roomEnabled;
+      label.textContent = pending ? 'Klimaat: wacht op bevestiging' : input.checked ? 'Klimaat aan' : 'Klimaat uit';
       input.setAttribute('aria-label', input.checked ? `Klimaatregeling voor ${room.name} uitschakelen` : `Klimaatregeling voor ${room.name} inschakelen`);
     };
     updateLabel();
@@ -1193,12 +1197,9 @@ function roomCard(room, config, live, compact = false) {
       if (!targetRoom) return;
       targetRoom.heatingEnabled = heatingEnabled;
       try {
-        const result = await saveThermal(next, false, true);
-        const sourceIds = result.thermal.sources.filter(source => source.controlRoomId === room.id && source.controlEnabled).map(source => source.id);
-        const issue = result.controlStatus?.decisions?.find(decision => decision.origin === 'thermal' && sourceIds.includes(decision.sourceId) && ['blocked', 'paused', 'waiting'].includes(decision.status));
-        if (issue) notify(`Instelling opgeslagen; ${issue.reason}`, true);
-        else if (result.thermal.mode !== 'active') notify('Instelling opgeslagen; zet Warmteregelaar op Actief om apparaten te bedienen.');
-        else notify(heatingEnabled ? `Klimaatregeling voor ${room.name} ingeschakeld.` : `Klimaatregeling voor ${room.name} uitgeschakeld.`);
+        const result = await saveThermal(next, false, true, room.id);
+        const feedback = roomClimateFeedback(result, room.id, heatingEnabled);
+        notify(feedback.message, feedback.error);
       } catch (error) {
         input.checked = !heatingEnabled;
         input.disabled = false;

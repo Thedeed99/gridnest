@@ -145,6 +145,9 @@ export function planThermal({ thermal, settings, entities, mappings, temperature
       : isFresh(temperatureEntity, now, settings.maxAgeSeconds) && temperatureEntity.domain === 'climate' && Number.isFinite(temperatureEntity.currentTemperature) ? temperatureEntity.currentTemperature : null;
     if (!Number.isFinite(currentC)) { plans.push(blocked('Automatische verwarming/koeling vereist een recente kamertemperatuur.')); continue; }
     let desiredMode = currentC < baseTarget - 0.5 ? 'heat' : currentC > baseTarget + 0.5 ? 'cool' : ['heat', 'cool'].includes(entity.state) ? entity.state : 'off';
+    if (manualSourceAction && desiredMode === 'off' && entity.state === 'off' && ['underfloor', 'airco'].includes(source.profile)) {
+      desiredMode = source.profile === 'airco' && !entity.hvacModes?.includes('heat') && entity.hvacModes?.includes('cool') ? 'cool' : 'heat';
+    }
     if (desiredMode === 'cool' && source.profile !== 'airco' && entity?.hvacModes?.includes('heat')) desiredMode = 'heat';
     if (desiredMode === 'off') { plans.push(planMode('off', `${room.name}: doel bereikt; klimaatregeling uitschakelen.`, `${room.name}: doel bereikt; klimaatregeling blijft uit.`)); continue; }
     if (!entity?.hvacModes?.includes(desiredMode)) {
