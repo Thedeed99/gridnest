@@ -20,6 +20,25 @@ const thermalConfig = () => ({
   rooms: [{ id: 'living', name: 'Woonkamer', floor: 'Begane grond', temperatureEntity: 'sensor.demo_temperature', presenceEntity: 'binary_sensor.demo_presence', targetC: 21, sourceIds: ['cv', 'airco'] }]
 });
 
+test('eigen zonneverbruik geeft providerresultaten en fouten expliciet door zonder kostentarief te vereisen', async context => {
+  let fail = false;
+  const { url } = await fixture(context, {
+    solarConsumptionProvider: async config => {
+      assert.ok(config.mappings);
+      if (fail) throw new Error('Zonnestatistieken ontbreken');
+      return { today: { energyKwh: 3, percentage: 75, avoidedCost: null }, month: { energyKwh: 30, percentage: 60, avoidedCost: null } };
+    }
+  });
+  const response = await fetch(`${url}/api/solar-consumption`);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  assert.equal((await response.json()).month.energyKwh, 30);
+  fail = true;
+  const failed = await fetch(`${url}/api/solar-consumption`);
+  assert.equal(failed.status, 503);
+  assert.deepEqual(await failed.json(), { error: 'Zonnestatistieken ontbreken' });
+});
+
 test('batterijniveaus bedienen uitsluitend de gekoppelde entiteiten met geldige grenzen', async context => {
   const commands = [];
   const { url, store } = await fixture(context, {

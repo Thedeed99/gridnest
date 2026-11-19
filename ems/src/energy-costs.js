@@ -12,7 +12,7 @@ function maxSampleAge(interval) {
   return interval === '15min' ? 20 * 60 * 1000 : interval === 'day' ? 26 * 60 * 60 * 1000 : 65 * 60 * 1000;
 }
 
-function electricityMeters(mappings, direction) {
+export function electricityMeters(mappings, direction) {
   const lowId = direction === 'return' ? mappings.electricityReturnLow : mappings.electricityLow;
   const highId = direction === 'return' ? mappings.electricityReturnHigh : mappings.electricityHigh;
   if (lowId || highId) return [lowId && { label: 'Laag', id: lowId }, highId && { label: 'Hoog', id: highId }].filter(Boolean);
@@ -179,6 +179,17 @@ export function recordEnergyPrices(costs, entities, priceHistory, now = Date.now
   return Promise.all([...byId].map(([historyKey, item]) => priceHistory.record(historyKey, item.value, now, item.minimumInterval)));
 }
 
+export function energyCostForPoints(points, start, end, rate, interval, priceHistory, timeZone) {
+  if (!rate) return null;
+  if (rate.source === 'manual') {
+    if (rate.futureRates?.length) return scheduledFixedCost(points, start, end, rate, timeZone);
+    const usage = periodUsage(points, start, end);
+    const price = fixedRateAt(rate, end, timeZone);
+    return usage === null || price === null ? null : usage * price;
+  }
+  return historicalCost(points, priceHistory[rate.entityId] ?? [], start, end, interval);
+}
+
 export function summarizeEnergyCosts({ costs, mappings, entities, statistics, priceHistory = {}, now = new Date(), timeZone }) {
   const localNow = DateTime.fromJSDate(now, { zone: timeZone });
   if (!localNow.isValid) throw new Error('Home Assistant-tijdzone is ongeldig.');
@@ -206,14 +217,8 @@ export function summarizeEnergyCosts({ costs, mappings, entities, statistics, pr
         const points = statistics[meter.id] ?? [];
         const todayUsage = meter.id ? periodUsage(points, todayStart, now.getTime()) : null;
         const monthUsage = meter.id ? periodUsage(points, monthStart, now.getTime()) : null;
-        const todayCost = !rate ? null : rate.source === 'manual'
-          ? rate.futureRates?.length ? scheduledFixedCost(points, todayStart, now.getTime(), rate, timeZone)
-            : todayUsage === null || price === null ? null : todayUsage * price
-          : historicalCost(points, priceHistory[rate.entityId] ?? [], todayStart, now.getTime(), meter.interval);
-        const monthCost = !rate ? null : rate.source === 'manual'
-          ? rate.futureRates?.length ? scheduledFixedCost(points, monthStart, now.getTime(), rate, timeZone)
-            : monthUsage === null || price === null ? null : monthUsage * price
-          : historicalCost(points, priceHistory[rate.entityId] ?? [], monthStart, now.getTime(), meter.interval);
+        const todayCost = energyCostForPoints(points, todayStart, now.getTime(), rate, meter.interval, priceHistory, timeZone);
+        const monthCost = energyCostForPoints(points, monthStart, now.getTime(), rate, meter.interval, priceHistory, timeZone);
         return { label: meter.label, rate, price, todayUsage, monthUsage, todayCost, monthCost };
       });
       const total = key => details.length && details.every(detail => detail[key] !== null) ? details.reduce((sum, detail) => sum + detail[key], 0) : null;

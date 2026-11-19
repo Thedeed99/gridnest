@@ -15,6 +15,7 @@ import { readOfficialEnergy } from './energy-statistics.js';
 import { demoEnergyCosts, energyTariffHistory, readEnergyCosts, recordEnergyPrices, validateEnergyCostPreferences } from './energy-costs.js';
 import { createPriceHistory } from './price-history.js';
 import { cumulativeSolarToday, isCumulativeSolarMeter, readSolarMeterToday } from './solar-meter.js';
+import { demoSolarConsumption, readSolarConsumption } from './solar-consumption.js';
 
 export function createApp({ store, entitiesProvider, demo = false, supervisor = false, runner = null,
   isIngressRequest = request => request.socket.remoteAddress === '172.30.32.2' || request.socket.remoteAddress === '::ffff:172.30.32.2',
@@ -23,6 +24,7 @@ export function createApp({ store, entitiesProvider, demo = false, supervisor = 
   officialRecapProvider = async () => null,
   solarTodayProvider = async () => null,
   energyCostsProvider = async () => ({ resources: [] }),
+  solarConsumptionProvider = async () => { throw new Error('Eigen zonneverbruik niet beschikbaar.'); },
   priceHistory = null,
   batterySwitchProvider = async () => { throw new Error('Accubediening niet beschikbaar.'); },
   consumerSwitchProvider = async () => { throw new Error('Verbruikerbediening niet beschikbaar.'); },
@@ -73,6 +75,15 @@ export function createApp({ store, entitiesProvider, demo = false, supervisor = 
       return response.json(await energyCostsProvider(config, connection.entities ?? []));
     } catch (error) {
       return response.status(503).json({ error: error.message || 'Energiekosten niet beschikbaar.' });
+    }
+  });
+  app.get('/api/solar-consumption', async (_request, response) => {
+    response.setHeader('Cache-Control', 'no-store');
+    try {
+      const connection = await entitiesProvider();
+      return response.json(await solarConsumptionProvider(store.get(), connection.entities ?? []));
+    } catch (error) {
+      return response.status(503).json({ error: error.message || 'Eigen zonneverbruik niet beschikbaar.' });
     }
   });
   app.get('/api/tariff-history', (_request, response) => {
@@ -367,6 +378,9 @@ export async function startServer(env = process.env) {
   const energyCostsProvider = demo
     ? (config, entities) => demoEnergyCosts(config, entities)
     : (config, entities) => readEnergyCosts(env, config, entities, new Date(), WebSocket, priceHistory.all());
+  const solarConsumptionProvider = demo
+    ? config => demoSolarConsumption(config)
+    : (config, entities) => readSolarConsumption(env, config, entities, new Date(), WebSocket, priceHistory.all());
   const solarTodayProvider = async (entityId, mode) => {
     const now = new Date();
     const entity = (await entitiesProvider()).entities.find(item => item.id === entityId);
@@ -382,7 +396,7 @@ export async function startServer(env = process.env) {
     unitProvider: demo ? async () => '°C' : () => readTemperatureUnit(env),
     activeAllowed: supervisor && controlEnv.CONTROL_ENABLED === 'true' && !demo,
     execute: command => executeRuleCommand(command, controlEnv) });
-  const app = createApp({ store, demo, supervisor, entitiesProvider, runner, utilityHistoryProvider, dailyRecapProvider, officialRecapProvider, solarTodayProvider, energyCostsProvider, priceHistory, batterySwitchProvider, solarLimitProvider, evCommandProvider, consumerSwitchProvider });
+  const app = createApp({ store, demo, supervisor, entitiesProvider, runner, utilityHistoryProvider, dailyRecapProvider, officialRecapProvider, solarTodayProvider, solarConsumptionProvider, energyCostsProvider, priceHistory, batterySwitchProvider, solarLimitProvider, evCommandProvider, consumerSwitchProvider });
   let priceCapture;
   const capturePrices = async () => {
     if (priceCapture) return priceCapture;

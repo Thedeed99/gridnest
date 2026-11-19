@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.19 - 2026-11-19
+
+- Behoud de verwachte en werkelijke zonne-opbrengst en toon daaronder eigen zonneverbruik voor vandaag en deze kalendermaand in kWh, procenten en vermeden stroominkoop.
+- Geef beide perioden weer in een kolom met iconen, een aandeelbalk en een gezamenlijk bijwerktijdstip, zonder extra uitlegtekst onder de kaarten.
+- Gebruik volledige Home Assistant-uurstatistieken en historische stroomtarieven; toon ontbrekende meetgegevens, onbekende batterijherkomst en ontbrekende prijzen expliciet in plaats van bedragen te schatten.
+
 ## 2.0.18 - 2026-11-02
 
 - Lijn de aan/uitknop van iedere verbruiker uit in een eigen rij boven de titel; lange namen lopen niet meer onder de knop door.
