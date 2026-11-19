@@ -1,4 +1,4 @@
-import { createIcons, Activity, Link, SlidersHorizontal, RefreshCw, HousePlug, House, Sun, Moon, Palette, Flame, Droplet, Plug, Car, Heater, BatteryCharging, Battery, Thermometer, ArrowUpRight, ArrowDownLeft, Lock, Unlock, Clock3, EllipsisVertical, Power, Save, Search, Check, Unplug, Plus, Pencil, Trash2, X, ListChecks, Pause, Play, Menu, Minus, CloudLightning, ChevronDown } from 'lucide';
+import { createIcons, Activity, Link, SlidersHorizontal, RefreshCw, HousePlug, House, Sun, Moon, Palette, Flame, Droplet, Plug, Car, Heater, BatteryCharging, Battery, Thermometer, ArrowUpRight, ArrowDownLeft, Lock, Unlock, Clock3, EllipsisVertical, Power, Save, Search, Check, Unplug, Plus, Pencil, Trash2, X, ListChecks, Pause, Play, Menu, Minus, CloudLightning, ChevronDown, CalendarDays, ChartPie, Euro } from 'lucide';
 import { Chart } from 'chart.js/auto';
 import { DateTime } from 'luxon';
 import { createId } from './ids.js';
@@ -19,7 +19,7 @@ function isCompatibleEntity(role, entity) {
     (!role.deviceClasses || role.deviceClasses.includes(entity.deviceClass));
 }
 
-const icons = { Activity, Link, SlidersHorizontal, RefreshCw, HousePlug, House, Sun, Moon, Palette, Flame, Droplet, Plug, Car, Heater, BatteryCharging, Battery, Thermometer, ArrowUpRight, ArrowDownLeft, Lock, Unlock, Clock3, EllipsisVertical, Power, Save, Search, Check, Unplug, Plus, Pencil, Trash2, X, ListChecks, Pause, Play, Menu, Minus, CloudLightning, ChevronDown };
+const icons = { Activity, Link, SlidersHorizontal, RefreshCw, HousePlug, House, Sun, Moon, Palette, Flame, Droplet, Plug, Car, Heater, BatteryCharging, Battery, Thermometer, ArrowUpRight, ArrowDownLeft, Lock, Unlock, Clock3, EllipsisVertical, Power, Save, Search, Check, Unplug, Plus, Pencil, Trash2, X, ListChecks, Pause, Play, Menu, Minus, CloudLightning, ChevronDown, CalendarDays, ChartPie, Euro };
 const main = document.querySelector('#main');
 let data;
 let view = 'overview';
@@ -45,6 +45,8 @@ let energyCostsCache;
 let energyCostsCacheKey;
 let energyCostsFetchedAt = 0;
 let energyCostsRequest;
+let solarConsumptionCache;
+let solarConsumptionRequest;
 let tariffHistoryCache;
 let tariffHistoryRequest;
 const liveBindings = new Map();
@@ -175,6 +177,8 @@ async function refresh(showButtonProgress = false) {
       if (view === 'rules') updateRuleStatus();
       if (view === 'overview' && dailyRecapPanelNode && (!dailyRecapCache || Date.now() - dailyRecapCache.fetchedAt > 30000)) loadDailyRecap(dailyRecapContentNode);
       if (view === 'overview') {
+        const solarPanel = main.querySelector('.solar-consumption');
+        if (solarPanel) loadSolarConsumption(solarPanel);
         const costsPanel = main.querySelector('.energy-costs-panel');
         if (costsPanel && Date.now() - energyCostsFetchedAt > 30000) loadEnergyCosts(costsPanel, true);
         for (const [utility, preference, role] of [['gas', 'showGas', 'gasConsumption'], ['water', 'showWater', 'waterConsumption']]) {
@@ -220,9 +224,8 @@ function solarOutlook(parent) {
   const outlook = data.energy?.solarOutlook;
   const hasNow = Boolean(data.mappings.solarExpectedNow);
   const hasToday = Boolean(data.mappings.solarExpectedToday || data.mappings.solarToday);
-  if (!hasNow && !hasToday) return;
   const section = element('section', 'solar-outlook');
-  section.append(element('h3', '', 'Zonne-opbrengst · verwachting en werkelijk'));
+  if (hasNow || hasToday) section.append(element('h3', '', 'Zonne-opbrengst · verwachting en werkelijk'));
   if (hasNow) {
     const row = element('div', 'solar-outlook-row');
     row.append(element('strong', 'solar-period', 'Nu'));
@@ -259,7 +262,98 @@ function solarOutlook(parent) {
     row.append(values);
     section.append(row);
   }
+  const consumption = element('section', 'solar-consumption');
+  consumption.setAttribute('aria-label', 'Zelf verbruikte zonnestroom');
+  consumption.append(element('p', 'muted', 'Eigen zonneverbruik ophalen…'));
+  section.append(consumption);
   parent.append(section);
+  loadSolarConsumption(consumption);
+}
+
+function solarConsumptionKey() {
+  return `${energyCostKey()}:${new Date().toISOString().slice(0, 13)}`;
+}
+
+function renderSolarConsumption(panel, summary) {
+  const heading = element('h3', 'solar-consumption-heading');
+  const sun = icon('sun');
+  sun.setAttribute('aria-hidden', 'true');
+  heading.append(sun, element('span', '', 'Zelf verbruikte zonnestroom'));
+  const cards = element('div', 'solar-consumption-cards');
+  panel.replaceChildren(heading, cards);
+  for (const [period, label, periodIcon] of [['today', 'Vandaag', 'clock-3'], ['month', 'Deze maand', 'calendar-days']]) {
+    const reading = summary[period];
+    const card = element('section', 'solar-consumption-card');
+    card.setAttribute('aria-label', label);
+    const title = element('h4', 'solar-consumption-period');
+    const clock = icon(periodIcon);
+    clock.setAttribute('aria-hidden', 'true');
+    title.append(clock, element('span', '', label));
+    const values = element('div', 'solar-consumption-values');
+    for (const [metricIcon, title, value, available] of [
+      ['house-plug', 'Zelf verbruikt', reading.energyKwh === null ? 'Niet beschikbaar' : `${number(reading.energyKwh)} kWh`, reading.energyKwh !== null],
+      ['chart-pie', 'Van zonneproductie', reading.percentage === null ? reading.productionKwh === 0 ? 'Geen productie' : 'Niet beschikbaar' : `${number(reading.percentage)}%`, reading.percentage !== null],
+      ['euro', 'Vermeden inkoop', reading.avoidedCost === null ? 'Niet beschikbaar' : currency(reading.avoidedCost), reading.avoidedCost !== null]
+    ]) {
+      const item = element('div', `solar-consumption-metric${available ? '' : ' solar-consumption-missing'}`);
+      const badge = element('span', 'solar-consumption-icon');
+      badge.setAttribute('aria-hidden', 'true');
+      badge.append(icon(metricIcon));
+      item.append(badge, element('span', 'solar-consumption-label', title), element('strong', '', value));
+      values.append(item);
+    }
+    card.append(title, values);
+    if (reading.percentage !== null) {
+      const share = element('div', 'solar-consumption-share');
+      const meter = element('meter', 'solar-share-meter');
+      meter.min = 0;
+      meter.max = 100;
+      meter.value = reading.percentage;
+      meter.setAttribute('aria-label', `${label}: aandeel zelf verbruikte zonneproductie`);
+      const legend = element('div', 'solar-share-legend');
+      legend.append(element('span', '', `${number(reading.percentage)}% zelf verbruikt`),
+        element('span', '', `${number(100 - reading.percentage)}% teruggeleverd`));
+      share.append(meter, legend);
+      card.append(share);
+    }
+    const messages = [reading.status, reading.costStatus].filter(Boolean);
+    if (messages.length) card.append(element('p', 'solar-consumption-status muted', messages.join(' · ')));
+    cards.append(card);
+  }
+  const updatedThrough = summary.today.updatedThrough ?? summary.month.updatedThrough;
+  if (updatedThrough) {
+    const updated = element('p', 'solar-consumption-updated muted');
+    const clock = icon('clock-3');
+    clock.setAttribute('aria-hidden', 'true');
+    updated.append(clock, element('span', '', `Bijgewerkt t/m ${new Intl.DateTimeFormat('nl-NL', {
+      timeZone: summary.timeZone, day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
+    }).format(new Date(updatedThrough))}`));
+    panel.append(updated);
+  }
+  createIcons({ icons });
+}
+
+async function loadSolarConsumption(panel) {
+  const key = solarConsumptionKey();
+  if (solarConsumptionCache?.key === key && Date.now() - solarConsumptionCache.fetchedAt < 30000) {
+    renderSolarConsumption(panel, solarConsumptionCache.result);
+    return;
+  }
+  const request = solarConsumptionRequest?.key === key ? solarConsumptionRequest
+    : { key, promise: api('solar-consumption') };
+  solarConsumptionRequest = request;
+  try {
+    const result = await request.promise;
+    if (!document.body.contains(panel) || key !== solarConsumptionKey()) return;
+    solarConsumptionCache = { key, result, fetchedAt: Date.now() };
+    renderSolarConsumption(panel, result);
+  } catch (error) {
+    if (!document.body.contains(panel) || key !== solarConsumptionKey()) return;
+    panel.replaceChildren(element('h3', '', 'Zelf verbruikte zonnestroom'),
+      element('p', 'solar-consumption-status muted', `Niet beschikbaar: ${error.message}`));
+  } finally {
+    if (solarConsumptionRequest === request) solarConsumptionRequest = undefined;
+  }
 }
 
 function batteryInfo(config) {
