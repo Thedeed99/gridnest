@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.20 - 2026-11-19
+
+- Bereken eigen zonnestroom ook met een thuisbatterij, UPS of onbekende batterijconfiguratie; deze aanwezigheid blokkeert de cijfers niet meer.
+- Markeer de kaarten dan als Indicatie, omdat zonneproductie min teruglevering geen onderscheid maakt tussen batterijopslag en de herkomst van batterij-export.
+- Behoud de controles op ontbrekende uurstatistieken, overlappende meters, tegenstrijdige energiebalans en ontbrekende tarieven.
+
 ## 2.0.19 - 2026-11-19
 
 - Behoud de verwachte en werkelijke zonne-opbrengst en toon daaronder eigen zonneverbruik voor vandaag en deze kalendermaand in kWh, procenten en vermeden stroominkoop.

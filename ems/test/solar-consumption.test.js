@@ -30,6 +30,7 @@ test('eigen zonnestroom voor vandaag en kalendermaand gebruikt dezelfde volledig
   assert.equal(summary.today.updatedThrough, new Date(through).toISOString());
   assert.equal(summary.month.periodStart, new Date(start).toISOString());
   assert.equal(summary.today.status, null);
+  assert.equal(summary.today.estimated, false);
 });
 
 test('ontbrekende maandhistorie blokkeert vandaag niet, nul blijft nul en een ongeldige balans wordt niet weggepoetst', () => {
@@ -50,19 +51,40 @@ test('ontbrekende maandhistorie blokkeert vandaag niet, nul blijft nul en een on
   assert.match(summary.today.status, /hoger dan zonneproductie/);
 });
 
-test('batterijen, onbekende configuratie, overlappende meters en ontbrekende teruglevering leveren geen misleidende cijfers', () => {
+test('batterijen en onbekende batterijconfiguratie blokkeren de indicatieve berekening niet', () => {
   const input = options();
-  for (const mappings of [{ batteryMode: 'unknown' }, { batteryMode: 'measured' }, { batteryMode: 'none', batteries: [{}] }]) {
+  for (const mappings of [{ batteryMode: 'unknown' }, { batteryMode: 'measured' },
+    { batteryMode: 'none', batteryPower: 'sensor.ups' }, { batteryMode: 'none', batterySoc: 'sensor.ups_soc' },
+    { batteryMode: 'none', batteries: [{}] }]) {
     const result = summarizeSolarConsumption({ ...input, mappings });
-    assert.equal(result.today.energyKwh, null);
-    assert.match(result.today.status, /batterij/);
+    assert.equal(result.today.energyKwh, 3);
+    assert.equal(result.month.energyKwh, 39);
+    assert.equal(result.today.percentage, 75);
+    assert.equal(result.today.avoidedCost, 3 * 0.3);
+    assert.equal(result.today.status, null);
+    assert.equal(result.today.estimated, true);
+    assert.equal(result.month.estimated, true);
   }
-  const battery = summarizeSolarConsumption({ ...input, groups: { ...groups, discharged: ['sensor.battery'] } });
-  assert.equal(battery.month.avoidedCost, null);
+  for (const group of ['charged', 'discharged']) {
+    const result = summarizeSolarConsumption({ ...input, groups: { ...groups, [group]: ['sensor.battery'] } });
+    assert.equal(result.today.energyKwh, 3);
+    assert.equal(result.today.estimated, true);
+    assert.equal(result.month.avoidedCost, 39 * 0.3);
+  }
+});
+
+test('ook met batterij blijven ontbrekende, overlappende of ongeldige meetgegevens geblokkeerd', () => {
+  const input = { ...options(), mappings: { batteryMode: 'measured' } };
   const missing = summarizeSolarConsumption({ ...input, groups: { ...groups, exported: [] } });
+  assert.equal(missing.today.energyKwh, null);
   assert.match(missing.today.status, /teruglever/);
   const duplicate = summarizeSolarConsumption({ ...input, groups: { ...groups, exported: groups.solar } });
+  assert.equal(duplicate.today.energyKwh, null);
   assert.match(duplicate.today.status, /afzonderlijke meters/);
+  input.statistics['sensor.export'].pop();
+  const incomplete = summarizeSolarConsumption(input);
+  assert.equal(incomplete.today.energyKwh, null);
+  assert.match(incomplete.today.status, /ontbreken/);
 });
 
 test('eigen zonnestroom gebruikt historische negatieve prijzen en geen huidige prijs als historie ontbreekt', () => {

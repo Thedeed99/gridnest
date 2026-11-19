@@ -20,16 +20,15 @@ export function summarizeSolarConsumption({ groups, mappings, statistics, electr
   // Recorder needs a few minutes to finish the preceding hour.
   const through = localNow.minus({ minutes: 5 }).startOf('hour').toMillis();
   const ids = [...new Set([...groups.solar, ...groups.exported])];
+  const estimated = Boolean(groups.charged.length || groups.discharged.length || mappings.batteryMode !== 'none'
+    || mappings.batteryPower || mappings.batterySoc || mappings.batteries?.length);
   const sourceStatus = !groups.solar.length ? 'Koppel een zonne-totaalmeter of stel zonnepanelen in bij Home Assistant Energie.'
     : !groups.exported.length ? 'Koppel een teruglever-energiemeter of stel teruglevering in bij Home Assistant Energie.'
-    : groups.solar.some(id => groups.exported.includes(id)) ? 'Zonneproductie en teruglevering moeten afzonderlijke meters zijn.'
-    : groups.charged.length || groups.discharged.length || mappings.batteryMode === 'measured' || mappings.batteryPower || mappings.batterySoc || mappings.batteries?.length
-      ? 'Met een thuisbatterij is de herkomst van opslag en export niet bekend; eigen zonneverbruik kan niet betrouwbaar worden bepaald.'
-      : mappings.batteryMode !== 'none' ? 'Geef bij Koppelingen aan of er een thuisbatterij is.' : null;
+    : groups.solar.some(id => groups.exported.includes(id)) ? 'Zonneproductie en teruglevering moeten afzonderlijke meters zijn.' : null;
   const periods = {};
   for (const [key, unit] of [['today', 'day'], ['month', 'month']]) {
     const start = localNow.startOf(unit).toMillis();
-    const result = { energyKwh: null, percentage: null, avoidedCost: null, productionKwh: null,
+    const result = { energyKwh: null, percentage: null, avoidedCost: null, productionKwh: null, estimated,
       periodStart: new Date(start).toISOString(), updatedThrough: null, status: sourceStatus, costStatus: null };
     periods[key] = result;
     if (sourceStatus) continue;

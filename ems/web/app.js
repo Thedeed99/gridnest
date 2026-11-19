@@ -289,6 +289,11 @@ function renderSolarConsumption(panel, summary) {
     const clock = icon(periodIcon);
     clock.setAttribute('aria-hidden', 'true');
     title.append(clock, element('span', '', label));
+    if (reading.estimated && reading.energyKwh !== null) {
+      const estimate = element('span', 'tag solar-consumption-estimate', 'Indicatie');
+      estimate.title = 'Zonneproductie min teruglevering; batterijopslag en de herkomst van batterij-export worden niet onderscheiden.';
+      title.append(estimate);
+    }
     const values = element('div', 'solar-consumption-values');
     for (const [metricIcon, title, value, available] of [
       ['house-plug', 'Zelf verbruikt', reading.energyKwh === null ? 'Niet beschikbaar' : `${number(reading.energyKwh)} kWh`, reading.energyKwh !== null],
